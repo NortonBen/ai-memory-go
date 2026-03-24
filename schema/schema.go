@@ -457,6 +457,51 @@ type EnrichedNode struct {
 	TraversalDepth    int     `json:"traversal_depth"`
 }
 
+// TimeRange defines a start and end time for temporal searches
+type TimeRange struct {
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+}
+
+// SearchQuery defines search parameters and modes
+type SearchQuery struct {
+	Text                string                 `json:"text"`
+	SessionID           string                 `json:"session_id"`
+	Mode                RetrievalMode          `json:"mode"`
+	Limit               int                    `json:"limit"`
+	SimilarityThreshold float64                `json:"similarity_threshold"`
+	Filters             map[string]interface{} `json:"filters"`
+	HopDepth            int                    `json:"hop_depth"` // Optional graph traversal depth
+	TimeRange           *TimeRange             `json:"time_range,omitempty"`
+}
+
+// SearchResults contains the results of a search operation
+type SearchResults struct {
+	Results       []*SearchResult `json:"results"`
+	Total         int             `json:"total"`
+	QueryTime     time.Duration   `json:"query_time"`
+	ContextSize   int             `json:"context_size"`
+	Answer        string          `json:"answer,omitempty"`
+	ParsedContext string          `json:"parsed_context,omitempty"`
+}
+
+// ThinkQuery defines parameters for the reasoning and answer generation
+type ThinkQuery struct {
+	Text             string `json:"text"`
+	SessionID        string `json:"session_id"`
+	Limit            int    `json:"limit"`             // Limit for vector search
+	HopDepth         int    `json:"hop_depth"`         // Depth of graph traversal (1 or 2)
+	IncludeReasoning bool   `json:"include_reasoning"` // If false, skip reasoning for faster answer
+}
+
+// ThinkResult represents the structured output of a MemoryEngine Think operation
+type ThinkResult struct {
+	Reasoning   string         `json:"reasoning"`
+	Answer      string         `json:"answer"`
+	ContextUsed *SearchResults `json:"context_used,omitempty"`
+}
+
+
 // SearchResult represents a final search result with rich context for LLM consumption
 type SearchResult struct {
 	DataPoint     *DataPoint             `json:"datapoint"`

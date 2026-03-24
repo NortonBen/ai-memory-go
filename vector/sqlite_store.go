@@ -211,6 +211,10 @@ func (s *SQLiteVectorStore) SimilaritySearchWithFilter(ctx context.Context, quer
 			return nil, err
 		}
 		score := 1.0 / (1.0 + distance)
+		
+		// DEBUG PRINT
+		fmt.Printf(" [DEBUG Vector DB] ID: %s, Distance: %f, Score: %f\n", id, distance, score)
+		
 		if score < threshold {
 			continue
 		}

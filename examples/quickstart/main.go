@@ -86,7 +86,7 @@ func main() {
 	llmExt := extractor.NewBasicExtractor(lmstudioProvider, nil)
 
 	// ─── 4. Memory Engine ─────────────────────────────────────────────────────
-	eng := engine.NewMemoryEngine(llmExt, embedder, relStore, engine.EngineConfig{MaxWorkers: 4})
+	eng := engine.NewMemoryEngineWithStores(llmExt, embedder, relStore, graphStore, vecStore, engine.EngineConfig{MaxWorkers: 4})
 	defer eng.Close()
 
 	// ─── 5. ADD: Ingest knowledge ─────────────────────────────────────────────
@@ -100,7 +100,7 @@ func main() {
 	sessionID := "session-demo-001"
 	dps := make([]*schema.DataPoint, 0, len(texts))
 	for _, text := range texts {
-		dp, err := eng.AddMemory(ctx, text, sessionID)
+		dp, err := eng.Add(ctx, text, map[string]interface{}{"sessionID": sessionID})
 		must(err, "AddMemory")
 		dps = append(dps, dp)
 		fmt.Printf("  Added: %s [%s]\n", dp.ID[:8], dp.ProcessingStatus)
@@ -112,7 +112,7 @@ func main() {
 	// ─── 6. COGIFY: Process knowledge → graph + embeddings ────────────────────
 	fmt.Println("\n=== COGNIFY ===")
 	for _, dp := range dps {
-		if err := eng.Cognify(ctx, dp.ID); err != nil {
+		if _, err := eng.Cognify(ctx, dp); err != nil {
 			log.Printf("  Warning: cognify %s: %v", dp.ID[:8], err)
 		}
 	}
@@ -162,7 +162,7 @@ func main() {
 			log.Printf("  Warning: embed[%d]: %v", i, err)
 			continue
 		}
-		vecStore.StoreEmbedding(ctx, fmt.Sprintf("chunk-%d", i), emb, map[string]interface{}{
+		vecStore.StoreEmbedding(ctx, dps[i].ID, emb, map[string]interface{}{
 			"session_id": sessionID,
 			"index":      i,
 		})
@@ -193,14 +193,16 @@ func main() {
 	}
 
 	// 7c. Relational search
-	dpResults, err := eng.Search(ctx, &storage.DataPointQuery{
-		SessionID:  sessionID,
-		SearchText: queryText,
-		SearchMode: "semantic",
-		Limit:      5,
+	dpResults, err := eng.Search(ctx, &schema.SearchQuery{
+		SessionID: sessionID,
+		Text:      queryText,
+		Limit:     5,
 	})
 	must(err, "relational search")
-	fmt.Printf("  Relational hits: %d\n", len(dpResults))
+	fmt.Printf("  Relational hits: %d\n", len(dpResults.Results))
+	if dpResults.Answer != "" {
+		fmt.Printf("\n  🤖 MemoryEngine LLM Answer:\n  %s\n", dpResults.Answer)
+	}
 
 	fmt.Println("\n✅ Done.")
 }

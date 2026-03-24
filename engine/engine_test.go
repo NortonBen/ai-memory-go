@@ -10,9 +10,9 @@ func TestNewMemoryEngine(t *testing.T) {
 	// Fast test to ensure initialization and closure without panic.
 	// For actual unit tests, robust mock implementations for 
 	// Extractor, EmbeddingProvider, and Storage are needed.
-	engine := NewMemoryEngine(nil, nil, nil, cfg)
-	if engine == nil {
-		t.Fatal("Expected NewMemoryEngine to return an instance")
+	engine, ok := NewMemoryEngine(nil, nil, nil, cfg).(*defaultMemoryEngine)
+	if !ok || engine == nil {
+		t.Fatal("Expected NewMemoryEngine to return an instance of *defaultMemoryEngine")
 	}
 	
 	if engine.workerPool == nil {

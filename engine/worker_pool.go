@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
-	"github.com/NortonBen/ai-memory-go/vector"
-)
+	"github.com/NortonBen/ai-memory-go/vector")
 
 // WorkerTask defines a task that can be executed by the worker pool.
 type WorkerTask interface {
-	Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage) error
+	Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error
 }
 
 // AddTask is responsible for processing a new memory DataPoint.
@@ -25,7 +25,7 @@ type AddTask struct {
 }
 
 // Execute performs the extraction and embedding logic for AddTask.
-func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage) error {
+func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error {
 	t.DataPoint.ProcessingStatus = schema.StatusProcessing
 	if err := store.UpdateDataPoint(ctx, t.DataPoint); err != nil {
 		log.Printf("Failed to update status to processing: %v", err)
@@ -38,16 +38,48 @@ func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb v
 	}
 	t.DataPoint.Embedding = embedding
 
+	// 1b. Store Embedding into VectorStore if provided
+	if vectorStore != nil {
+		err = vectorStore.StoreEmbedding(ctx, t.DataPoint.ID, embedding, map[string]interface{}{
+			"content_type": t.DataPoint.ContentType,
+			"session_id":   t.DataPoint.SessionID,
+			"user_id":      t.DataPoint.UserID,
+		})
+		if err != nil {
+			log.Printf("failed to store embedding in vectorStore: %v", err)
+		}
+	}
+
 	// 2. Extract Entities
 	nodes, err := ext.ExtractEntities(ctx, t.DataPoint.Content)
 	if err != nil {
 		return t.fail(ctx, store, fmt.Errorf("entity extraction failed: %w", err))
 	}
 
+	// 2b. Store Graph Nodes into GraphStore if provided
+	if graphStore != nil {
+		for i := range nodes {
+			err = graphStore.StoreNode(ctx, &nodes[i])
+			if err != nil {
+				log.Printf("failed to store node %s in graphStore: %v", nodes[i].ID, err)
+			}
+		}
+	}
+
 	// 3. Extract Relationships
 	edges, err := ext.ExtractRelationships(ctx, t.DataPoint.Content, nodes)
 	if err != nil {
 		log.Printf("Warning: relationship extraction returned error: %v", err)
+	}
+
+	// 3b. Store Relationships
+	if graphStore != nil && len(edges) > 0 {
+		for i := range edges {
+			err = graphStore.CreateRelationship(ctx, &edges[i])
+			if err != nil {
+				log.Printf("failed to store edge in graphStore: %v", err)
+			}
+		}
 	}
 
 	// 4. Map edges to Relationships in DataPoint
@@ -83,31 +115,35 @@ type CognifyTask struct {
 }
 
 // Execute performs re-extraction and updating for CognifyTask.
-func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage) error {
+func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error {
 	addT := &AddTask{DataPoint: t.DataPoint}
-	return addT.Execute(ctx, ext, emb, store)
+	return addT.Execute(ctx, ext, emb, store, graphStore, vectorStore)
 }
 
 // WorkerPool manages a pool of workers to process MemoryEngine tasks concurrently.
 type WorkerPool struct {
 	maxWorkers int
-	taskQueue  chan WorkerTask
-	extractor  extractor.LLMExtractor
-	embedder   vector.EmbeddingProvider
-	store      storage.Storage
-	wg         sync.WaitGroup
-	quit       chan struct{}
+	taskQueue   chan WorkerTask
+	extractor   extractor.LLMExtractor
+	embedder    vector.EmbeddingProvider
+	store       storage.Storage
+	graphStore  graph.GraphStore
+	vectorStore vector.VectorStore
+	wg          sync.WaitGroup
+	quit        chan struct{}
 }
 
 // NewWorkerPool initializes the WorkerPool.
-func NewWorkerPool(maxWorkers int, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage) *WorkerPool {
+func NewWorkerPool(maxWorkers int, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) *WorkerPool {
 	return &WorkerPool{
-		maxWorkers: maxWorkers,
-		taskQueue:  make(chan WorkerTask, 1000), // Buffered channel for backpressure
-		extractor:  ext,
-		embedder:   emb,
-		store:      store,
-		quit:       make(chan struct{}),
+		maxWorkers:  maxWorkers,
+		taskQueue:   make(chan WorkerTask, 1000), // Buffered channel for backpressure
+		extractor:   ext,
+		embedder:    emb,
+		store:       store,
+		graphStore:  graphStore,
+		vectorStore: vectorStore,
+		quit:        make(chan struct{}),
 	}
 }
 
@@ -126,7 +162,7 @@ func (wp *WorkerPool) worker() {
 	for {
 		select {
 		case task := <-wp.taskQueue:
-			if err := task.Execute(ctx, wp.extractor, wp.embedder, wp.store); err != nil {
+			if err := task.Execute(ctx, wp.extractor, wp.embedder, wp.store, wp.graphStore, wp.vectorStore); err != nil {
 				log.Printf("Task execution error: %v", err)
 			}
 		case <-wp.quit:
