@@ -21,12 +21,78 @@ type EngineConfig struct {
 	MaxWorkers int
 }
 
+// AddOptions holds optional parameters for the Add operation
+type AddOptions struct {
+	SessionID         string
+	Metadata          map[string]interface{}
+	WaitUntilComplete bool
+}
+
+// AddOption configures AddOptions
+type AddOption func(*AddOptions)
+
+// WithMetadata adds custom metadata to the DataPoint
+func WithMetadata(metadata map[string]interface{}) AddOption {
+	return func(o *AddOptions) {
+		if o.Metadata == nil {
+			o.Metadata = make(map[string]interface{})
+		}
+		for k, v := range metadata {
+			o.Metadata[k] = v
+		}
+	}
+}
+
+// WithWaitAdd configures whether Add should wait for background extraction to complete.
+func WithWaitAdd(wait bool) AddOption {
+	return func(o *AddOptions) {
+		o.WaitUntilComplete = wait
+	}
+}
+
+// WithSessionID explicitly maps a session identifier onto the DataPoint
+func WithSessionID(sessionID string) AddOption {
+	return func(o *AddOptions) {
+		o.SessionID = sessionID
+	}
+}
+
+// CognifyOptions holds optional parameters for the Cognify operation
+type CognifyOptions struct {
+	WaitUntilComplete bool
+}
+
+// CognifyOption configures CognifyOptions
+type CognifyOption func(*CognifyOptions)
+
+// WithWaitCognify causes the process to wait for completion before returning.
+func WithWaitCognify(wait bool) CognifyOption {
+	return func(o *CognifyOptions) {
+		o.WaitUntilComplete = wait
+	}
+}
+
+// MemifyOptions holds optional parameters for the Memify operation
+type MemifyOptions struct {
+	WaitUntilComplete bool
+}
+
+// MemifyOption configures MemifyOptions
+type MemifyOption func(*MemifyOptions)
+
+// WithWaitMemify allows Memify to wait for any background completions (though currently synchronous).
+func WithWaitMemify(wait bool) MemifyOption {
+	return func(o *MemifyOptions) {
+		o.WaitUntilComplete = wait
+	}
+}
+
 // MemoryEngine defines the core memory operations
 type MemoryEngine interface {
 	// Core pipeline operations
-	Add(ctx context.Context, content string, metadata map[string]interface{}) (*schema.DataPoint, error)
-	Cognify(ctx context.Context, dataPoint *schema.DataPoint) (*schema.DataPoint, error)
-	Memify(ctx context.Context, dataPoint *schema.DataPoint) error
+	Add(ctx context.Context, content string, opts ...AddOption) (*schema.DataPoint, error)
+	Cognify(ctx context.Context, dataPoint *schema.DataPoint, opts ...CognifyOption) (*schema.DataPoint, error)
+	Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error
 	Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error)
 	Think(ctx context.Context, query *schema.ThinkQuery) (*schema.ThinkResult, error)
 
@@ -87,10 +153,26 @@ func NewMemoryEngineWithStores(ext extractor.LLMExtractor, emb vector.EmbeddingP
 }
 
 // Add persists the initial DataPoint and optionally starts asynchronous processing.
-func (e *defaultMemoryEngine) Add(ctx context.Context, content string, metadata map[string]interface{}) (*schema.DataPoint, error) {
-	sessionID, _ := metadata["session_id"].(string)
+func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...AddOption) (*schema.DataPoint, error) {
+	options := &AddOptions{
+		Metadata: make(map[string]interface{}),
+	}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	sessionID := options.SessionID
 	if sessionID == "" {
-		sessionID = "default"
+		// Fallback check if someone used sessionID or session_id in metadata instead
+		if sid, ok := options.Metadata["session_id"].(string); ok && sid != "" {
+			sessionID = sid
+			delete(options.Metadata, "session_id")
+		} else if sid, ok := options.Metadata["sessionID"].(string); ok && sid != "" {
+			sessionID = sid
+			delete(options.Metadata, "sessionID")
+		} else {
+			sessionID = "default"
+		}
 	}
 
 	dp := &schema.DataPoint{
@@ -101,7 +183,7 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, metadata 
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		ProcessingStatus: schema.StatusPending,
-		Metadata:         metadata,
+		Metadata:         options.Metadata,
 	}
 
 	// Persist the initial pending DataPoint
@@ -110,26 +192,63 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, metadata 
 		return nil, fmt.Errorf("failed to store initial DataPoint: %w", err)
 	}
 
-	// Queue for processing
-	e.workerPool.Submit(&AddTask{
+	task := &AddTask{
 		DataPoint: dp,
-	})
+	}
+
+	if options.WaitUntilComplete {
+		// Wait for execution to finish synchronously
+		err = task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore)
+		return dp, err
+	}
+
+	// Queue for processing
+	e.workerPool.Submit(task)
 
 	return dp, nil
 }
 
 // Cognify process updates relationships and embeddings for an existing DataPoint synchronously.
-func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.DataPoint) (*schema.DataPoint, error) {
-	// For now, reuse the async worker pool submission or do it synchronously
-	e.workerPool.Submit(&CognifyTask{
+func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.DataPoint, opts ...CognifyOption) (*schema.DataPoint, error) {
+	options := &CognifyOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	task := &CognifyTask{
 		DataPoint: dataPoint,
-	})
+	}
+
+	if options.WaitUntilComplete {
+		// Run synchronously and wait for the extraction & embedding to finish
+		err := task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore)
+		return dataPoint, err
+	}
+
+	// Run asynchronously
+	e.workerPool.Submit(task)
 	return dataPoint, nil
 }
 
 // Memify finalizes the memory integration (e.g. promoting concepts).
-func (e *defaultMemoryEngine) Memify(ctx context.Context, dataPoint *schema.DataPoint) error {
-	// Add logic to finalize memory integration
+func (e *defaultMemoryEngine) Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error {
+	options := &MemifyOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	dataPoint.ProcessingStatus = schema.StatusCompleted
+	dataPoint.UpdatedAt = time.Now()
+
+	if e.store != nil {
+		if err := e.store.StoreDataPoint(ctx, dataPoint); err != nil {
+			return fmt.Errorf("failed to persist Memify status: %w", err)
+		}
+	}
+
+	// Currently Memify completes instantly. The WaitUntilComplete flag is preserved
+	// for future background integrations if needed.
+
 	return nil
 }
 
@@ -169,18 +288,9 @@ func (e *defaultMemoryEngine) basicSearch(ctx context.Context, query *schema.Sea
 	return results, nil
 }
 
-// Search implements the 4-step Cognee-style Hybrid Search pipeline
-// Step 1: Input Processing (Vectorize + Extract Entities)
-// Step 2: Hybrid Search (Vector + Graph Anchors)
-// Step 3: Graph Traversal (1-hop/2-hop discovery)
-// Step 4: Context Assembly & Reranking
-func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
-	if e.graphStore == nil || e.vectorStore == nil {
-		return e.basicSearch(ctx, query)
-	}
-
+func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
 	// ---------------------------------------------------------
-	// Step 1: Input Processing
+	// Step 1: Input Processing (Vectorize + Extract Entities)
 	// ---------------------------------------------------------
 	emb, err := e.embedder.GenerateEmbedding(ctx, query.Text)
 	if err != nil {
@@ -220,8 +330,9 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 	}
 
 	// ---------------------------------------------------------
-	// Step 2: Hybrid Search (Vector + Graph)
+	// Step 2: Hybrid Search (Vector + Graph Anchors)
 	// ---------------------------------------------------------
+	anchorNodeIDs := make(map[string]bool)
 	
 	// 2a. Vector Search
 	threshold := query.SimilarityThreshold
@@ -233,15 +344,20 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 		for _, vr := range vecResults {
 			if item := trackDataPoint(vr.ID); item != nil {
 				item.vectorScore = vr.Score
+				// Treat the Graph Nodes linked to this DataPoint as Graph Anchors!
+				linkedNodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", vr.ID)
+				if err == nil {
+					for _, ln := range linkedNodes {
+						anchorNodeIDs[ln.ID] = true
+					}
+				}
 			}
 		}
 	} else {
 		fmt.Printf(" [DEBUG] SimilaritySearch failed: %v\n", err)
 	}
 
-	// 2b. Graph Anchor Search
-	// Map extracted entities to graph nodes
-	anchorNodeIDs := make(map[string]bool)
+	// 2b. Graph Anchor Search (from Extracted Entities)
 	for _, entity := range extractedEntities {
 		name, _ := entity.Properties["name"].(string)
 		if name == "" {
@@ -345,10 +461,24 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 	}
 	results.ParsedContext = contextBuilder.String()
 
+	return results, nil
+}
+
+// Search implements the 4-step Cognee-style Hybrid Search pipeline, terminating with a direct string answer.
+func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
+	if e.graphStore == nil || e.vectorStore == nil {
+		return e.basicSearch(ctx, query)
+	}
+
+	results, err := e.retrieveContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
 	// ---------------------------------------------------------
-	// Step 4c: LLM Answer Generation
+	// Step 4c: LLM Answer Generation (Plain text)
 	// ---------------------------------------------------------
-	if len(rankedItems) > 0 && e.extractor != nil && e.extractor.GetProvider() != nil {
+	if len(results.Results) > 0 && e.extractor != nil && e.extractor.GetProvider() != nil {
 		prompt := fmt.Sprintf("You are an intelligent memory assistant. Use the following context to answer the user's query.\n\nContext:\n%s\n\nUser Query: %s\n\nAnswer:", results.ParsedContext, query.Text)
 		answer, err := e.extractor.GetProvider().GenerateCompletion(ctx, prompt)
 		if err == nil {
@@ -356,7 +486,7 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 		} else {
 			results.Answer = fmt.Sprintf("Error generating answer: %v", err)
 		}
-	} else if len(rankedItems) == 0 {
+	} else if len(results.Results) == 0 {
 		results.Answer = "I couldn't find any relevant memory context to answer your question."
 	}
 
@@ -408,14 +538,14 @@ func (e *defaultMemoryEngine) Think(ctx context.Context, query *schema.ThinkQuer
 		return nil, fmt.Errorf("LLM provider is required for Think")
 	}
 
-	// 1. Perform Hybrid Search to get vector-ranked DataPoints and traversed Graph Nodes
+	// 1. Perform retrieval sequence via retrieveContext helper
 	searchQuery := &schema.SearchQuery{
 		Text:      query.Text,
 		SessionID: query.SessionID,
 		Limit:     query.Limit,
 		HopDepth:  query.HopDepth,
 	}
-	results, err := e.Search(ctx, searchQuery)
+	results, err := e.retrieveContext(ctx, searchQuery)
 	if err != nil {
 		return nil, fmt.Errorf("hybrid search failed: %w", err)
 	}

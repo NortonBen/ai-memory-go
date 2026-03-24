@@ -60,7 +60,7 @@ func main() {
 	}
 
 	for _, text := range texts {
-		dp, err := eng.Add(ctx, text, map[string]interface{}{"sessionID": sessionID})
+		dp, err := eng.Add(ctx, text, engine.WithSessionID(sessionID))
 		must(err, "add memory")
 		fmt.Printf("- Added to pipeline: %s\n", dp.ID[:8])
 	}

@@ -599,8 +599,8 @@ autoEmbedder.AddProvider("primary", embeddingProvider)
 memoryEngine := NewMemoryEngine(extractor, graphStore, vectorStore, relationalStore)
 memoryEngine.SetEmbeddingProvider(embeddingProvider)
 
-// Use memory engine with configured providers
-dataPoint, _ := memoryEngine.Add(ctx, "I'm learning about AI memory systems", metadata)
+// Use memory engine// Add data, kicking off the pipeline
+dataPoint, _ := memoryEngine.Add(ctx, "I'm learning about AI memory systems", engine.WithMetadata(metadata))
 enriched, _ := memoryEngine.Cognify(ctx, dataPoint)
 memoryEngine.Memify(ctx, enriched)
 ```

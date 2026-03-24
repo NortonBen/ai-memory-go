@@ -423,8 +423,8 @@ provider, _ := factory.CreateProvider(config)
 extractor := NewBasicExtractor(provider, DefaultExtractionConfig())
 memoryEngine := NewMemoryEngine(extractor, graphStore, vectorStore, relationalStore)
 
-// Add and process memory
-dataPoint, _ := memoryEngine.Add(ctx, "I struggle with Present Perfect tense", metadata)
+// Add datapoint with implicit reasoning requirement
+dataPoint, _ := memoryEngine.Add(ctx, "I struggle with Present Perfect tense", engine.WithMetadata(metadata))
 enriched, _ := memoryEngine.Cognify(ctx, dataPoint)
 memoryEngine.Memify(ctx, enriched)
 

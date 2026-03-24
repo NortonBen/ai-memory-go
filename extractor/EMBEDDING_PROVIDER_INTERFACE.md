@@ -603,8 +603,8 @@ autoEmbedder.AddProvider("primary", embeddingProvider)
 memoryEngine := NewMemoryEngine(llmExtractor, graphStore, vectorStore, relationalStore)
 memoryEngine.SetEmbeddingProvider(embeddingProvider)
 
-// Add and process memory with embeddings
-dataPoint, _ := memoryEngine.Add(ctx, "I'm learning about embeddings", metadata)
+// Add data, which will eventually be embedded
+dataPoint, _ := memoryEngine.Add(ctx, "I'm learning about embeddings", engine.WithMetadata(metadata))
 enriched, _ := memoryEngine.Cognify(ctx, dataPoint) // This will generate embeddings
 memoryEngine.Memify(ctx, enriched) // This will store embeddings in vector store
 

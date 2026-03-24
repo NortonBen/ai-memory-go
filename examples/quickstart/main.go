@@ -100,7 +100,7 @@ func main() {
 	sessionID := "session-demo-001"
 	dps := make([]*schema.DataPoint, 0, len(texts))
 	for _, text := range texts {
-		dp, err := eng.Add(ctx, text, map[string]interface{}{"sessionID": sessionID})
+		dp, err := eng.Add(ctx, text, engine.WithSessionID(sessionID))
 		must(err, "AddMemory")
 		dps = append(dps, dp)
 		fmt.Printf("  Added: %s [%s]\n", dp.ID[:8], dp.ProcessingStatus)

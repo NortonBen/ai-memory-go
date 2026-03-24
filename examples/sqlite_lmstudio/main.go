@@ -65,7 +65,7 @@ func main() {
 	}
 
 	for _, text := range texts {
-		dp, err := eng.Add(ctx, text, map[string]interface{}{"sessionID": sessionID, "source": "docs"})
+		dp, err := eng.Add(ctx, text, engine.WithSessionID(sessionID), engine.WithMetadata(map[string]interface{}{"source": "docs"}))
 		must(err, "add memory")
 		fmt.Printf("- Stored datapoint: %s\n", dp.ID[:8])
 	}
