@@ -45,9 +45,9 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 	// Define extraction result structure
 	type ExtractionResult struct {
 		Entities []struct {
-			Name       string                 `json:"name"`
-			Type       string                 `json:"type"`
-			Properties map[string]interface{} `json:"properties,omitempty"`
+			Name       string      `json:"name"`
+			Type       string      `json:"type"`
+			Properties interface{} `json:"properties,omitempty"`
 		} `json:"entities"`
 	}
 
@@ -61,10 +61,33 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 	nodes := make([]schema.Node, 0, len(result.Entities))
 	for _, entity := range result.Entities {
 		nodeType := schema.NodeType(entity.Type)
-		properties := entity.Properties
-		if properties == nil {
-			properties = make(map[string]interface{})
+
+		properties := make(map[string]interface{})
+
+		// Robust property parsing to handle different LLM outputs gracefully
+		if entity.Properties != nil {
+			switch v := entity.Properties.(type) {
+			case map[string]interface{}:
+				properties = v
+			case []interface{}:
+				var strVals []string
+				for _, item := range v {
+					if str, ok := item.(string); ok {
+						strVals = append(strVals, str)
+					}
+				}
+				if len(strVals) > 0 {
+					properties["description"] = strings.Join(strVals, ", ")
+				} else {
+					for i, item := range v {
+						properties[fmt.Sprintf("item_%d", i)] = item
+					}
+				}
+			case string:
+				properties["description"] = v
+			}
 		}
+
 		properties["name"] = entity.Name
 
 		node := schema.NewNode(nodeType, properties)
@@ -84,7 +107,7 @@ func (be *BasicExtractor) extractEntitiesFromText(ctx context.Context, prompt st
 	// Parse response (simplified - in production use more robust parsing)
 	nodes := make([]schema.Node, 0)
 	lines := strings.Split(response, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -96,11 +119,11 @@ func (be *BasicExtractor) extractEntitiesFromText(ctx context.Context, prompt st
 		if len(parts) >= 2 {
 			name := strings.TrimSpace(parts[0])
 			typeStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), ")")
-			
+
 			properties := map[string]interface{}{
 				"name": name,
 			}
-			
+
 			node := schema.NewNode(schema.NodeType(typeStr), properties)
 			nodes = append(nodes, *node)
 		}
@@ -128,10 +151,11 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 	// Define extraction result structure
 	type RelationshipResult struct {
 		Relationships []struct {
-			From   string  `json:"from"`
-			To     string  `json:"to"`
-			Type   string  `json:"type"`
-			Weight float64 `json:"weight,omitempty"`
+			From       string      `json:"from"`
+			To         string      `json:"to"`
+			Type       string      `json:"type"`
+			Weight     float64     `json:"weight,omitempty"`
+			Properties interface{} `json:"properties,omitempty"`
 		} `json:"relationships"`
 	}
 
@@ -140,6 +164,8 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract relationships: %w", err)
 	}
+
+	//fmt.Println("Relationships extracted:", result.Relationships)
 
 	// Create entity name to ID mapping
 	entityMap := make(map[string]string)
@@ -165,6 +191,28 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 		}
 
 		edge := schema.NewEdge(fromID, toID, schema.EdgeType(rel.Type), weight)
+
+		// Parse properties robustly if present
+		if rel.Properties != nil {
+			switch v := rel.Properties.(type) {
+			case map[string]interface{}:
+				edge.Properties = v
+			case []interface{}:
+				edge.Properties = make(map[string]interface{})
+				var strVals []string
+				for _, item := range v {
+					if str, ok := item.(string); ok {
+						strVals = append(strVals, str)
+					}
+				}
+				if len(strVals) > 0 {
+					edge.Properties["description"] = strings.Join(strVals, ", ")
+				}
+			case string:
+				edge.Properties = map[string]interface{}{"description": v}
+			}
+		}
+
 		edges = append(edges, *edge)
 	}
 
@@ -189,7 +237,7 @@ func (be *BasicExtractor) extractRelationshipsFromText(ctx context.Context, prom
 	// Parse response (simplified)
 	edges := make([]schema.Edge, 0)
 	lines := strings.Split(response, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -201,15 +249,15 @@ func (be *BasicExtractor) extractRelationshipsFromText(ctx context.Context, prom
 		if len(parts) >= 2 {
 			from := strings.TrimSpace(parts[0])
 			rest := strings.TrimSpace(parts[1])
-			
+
 			toParts := strings.Split(rest, "(")
 			if len(toParts) >= 2 {
 				to := strings.TrimSpace(toParts[0])
 				relType := strings.TrimSuffix(strings.TrimSpace(toParts[1]), ")")
-				
+
 				fromID, fromExists := entityMap[from]
 				toID, toExists := entityMap[to]
-				
+
 				if fromExists && toExists {
 					edge := schema.NewEdge(fromID, toID, schema.EdgeType(relType), 1.0)
 					edges = append(edges, *edge)
@@ -243,25 +291,8 @@ func (be *BasicExtractor) generateEntityPrompt(text string) string {
 		return strings.ReplaceAll(be.config.EntityPrompt, "{text}", text)
 	}
 
-	// Default prompt based on domain
-	switch be.config.Domain {
-	case "english_learning":
-		return fmt.Sprintf(`Extract entities from the following text about English learning. 
-Identify:
-- Grammar concepts (type: GrammarRule)
-- Vocabulary words (type: Word)
-- Language concepts (type: Concept)
-- User preferences or struggles (type: UserPreference)
-
-Text: %s
-
-Return a JSON object with an "entities" array. Each entity should have:
-- name: the entity name
-- type: one of GrammarRule, Word, Concept, UserPreference
-- properties: additional properties (optional)`, text)
-
-	default:
-		return fmt.Sprintf(`Extract key entities from the following text.
+	// Default generic prompt
+	return fmt.Sprintf(`Extract key entities from the following text.
 Identify important concepts, people, places, organizations, and other significant entities.
 
 Text: %s
@@ -269,8 +300,7 @@ Text: %s
 Return a JSON object with an "entities" array. Each entity should have:
 - name: the entity name
 - type: the entity type (Concept, Entity, etc.)
-- properties: additional properties (optional)`, text)
-	}
+- properties: a JSON object containing key-value pairs of additional details (optional)`, text)
 }
 
 // generateRelationshipPrompt generates a prompt for relationship extraction
@@ -295,22 +325,8 @@ func (be *BasicExtractor) generateRelationshipPrompt(text string, entities []sch
 		}
 	}
 
-	// Default prompt based on domain
-	switch be.config.Domain {
-	case "english_learning":
-		return fmt.Sprintf(`Given these entities: %s
-
-Analyze the following text and identify relationships between the entities:
-%s
-
-Return a JSON object with a "relationships" array. Each relationship should have:
-- from: source entity name
-- to: target entity name
-- type: relationship type (RELATED_TO, STRUGGLES_WITH, SYNONYM, PART_OF, etc.)
-- weight: relationship strength (0.0 to 1.0, optional)`, strings.Join(entityNames, ", "), text)
-
-	default:
-		return fmt.Sprintf(`Given these entities: %s
+	// Default generic prompt
+	return fmt.Sprintf(`Given these entities: %s
 
 Analyze the following text and identify relationships between the entities:
 %s
@@ -320,5 +336,4 @@ Return a JSON object with a "relationships" array. Each relationship should have
 - to: target entity name
 - type: relationship type (RELATED_TO, SIMILAR_TO, PART_OF, etc.)
 - weight: relationship strength (0.0 to 1.0, optional)`, strings.Join(entityNames, ", "), text)
-	}
 }
