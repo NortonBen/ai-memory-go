@@ -1,0 +1,137 @@
+{
+  "summary": {
+    "fastest_test": "StreamingParser_Performance",
+    "least_efficient": "UnifiedParser_SmallFiles",
+    "most_efficient": "UnifiedParser_LargeFiles",
+    "slowest_test": "CachedParser_Performance"
+  },
+  "test_results": [
+    {
+      "timestamp": "2026-03-23T12:46:36.676015+07:00",
+      "test_name": "UnifiedParser_SmallFiles",
+      "duration": 1362000,
+      "throughput_mbps": 48.083523387279904,
+      "memory_usage_mb": 0.60455322265625,
+      "allocations_per_op": 1801,
+      "gc_pauses": [],
+      "cpu_usage_percent": 600,
+      "worker_pool_metrics": {
+        "TasksSubmitted": 20,
+        "TasksCompleted": 20,
+        "TasksFailed": 0,
+        "TasksRetried": 0,
+        "TotalProcessingTime": 3339543,
+        "AverageProcessingTime": 166977,
+        "ActiveWorkers": 12,
+        "QueueLength": 0
+      }
+    },
+    {
+      "timestamp": "2026-03-23T12:46:36.80457+07:00",
+      "test_name": "UnifiedParser_LargeFiles",
+      "duration": 1400709,
+      "throughput_mbps": 392.39033497582767,
+      "memory_usage_mb": 3.2444229125976562,
+      "allocations_per_op": 8364,
+      "gc_pauses": [],
+      "cpu_usage_percent": 600,
+      "worker_pool_metrics": {
+        "TasksSubmitted": 5,
+        "TasksCompleted": 5,
+        "TasksFailed": 0,
+        "TasksRetried": 0,
+        "TotalProcessingTime": 3341334,
+        "AverageProcessingTime": 668266,
+        "ActiveWorkers": 12,
+        "QueueLength": 0
+      }
+    },
+    {
+      "timestamp": "2026-03-23T12:46:36.821467+07:00",
+      "test_name": "CachedParser_Performance",
+      "duration": 4897917,
+      "throughput_mbps": 52.26999331211347,
+      "memory_usage_mb": 11.935920715332031,
+      "allocations_per_op": 13726,
+      "gc_pauses": [],
+      "cpu_usage_percent": 600,
+      "worker_pool_metrics": {
+        "TasksSubmitted": 0,
+        "TasksCompleted": 0,
+        "TasksFailed": 0,
+        "TasksRetried": 0,
+        "TotalProcessingTime": 0,
+        "AverageProcessingTime": 0,
+        "ActiveWorkers": 0,
+        "QueueLength": 0
+      },
+      "cache_metrics": {
+        "hits": 10,
+        "misses": 10,
+        "evictions": 0,
+        "total_entries": 10,
+        "memory_usage_bytes": 180658,
+        "hit_rate": 0.5,
+        "average_access_time": 124805,
+        "last_cleanup": "0001-01-01T00:00:00Z",
+        "compression_ratio": 0.08311719651169484,
+        "persistence_operations": 0,
+        "last_persistence": "0001-01-01T00:00:00Z",
+        "concurrent_operations": 0,
+        "max_concurrent_operations": 1,
+        "warmup_time": 0,
+        "error_count": 0
+      }
+    },
+    {
+      "timestamp": "2026-03-23T12:46:37.086411+07:00",
+      "test_name": "StreamingParser_Performance",
+      "duration": 1309375,
+      "throughput_mbps": 384.29911102728823,
+      "memory_usage_mb": 2.5481643676757812,
+      "allocations_per_op": 1304,
+      "gc_pauses": [],
+      "cpu_usage_percent": 600,
+      "worker_pool_metrics": {
+        "TasksSubmitted": 0,
+        "TasksCompleted": 0,
+        "TasksFailed": 0,
+        "TasksRetried": 0,
+        "TotalProcessingTime": 0,
+        "AverageProcessingTime": 0,
+        "ActiveWorkers": 0,
+        "QueueLength": 0
+      },
+      "streaming_metrics": {
+        "buffer_size": 65536,
+        "chunks_processed": 81,
+        "bytes_processed": 297591,
+        "processing_time": 738500,
+        "memory_efficiency": 11.137621147748606,
+        "peak_memory_usage": 1314072
+      }
+    },
+    {
+      "timestamp": "2026-03-23T12:46:37.107948+07:00",
+      "test_name": "WorkerPool_Scaling",
+      "duration": 2390291,
+      "throughput_mbps": 163.03937928193912,
+      "memory_usage_mb": 3.8579025268554688,
+      "allocations_per_op": 9864,
+      "gc_pauses": [],
+      "cpu_usage_percent": 600,
+      "worker_pool_metrics": {
+        "TasksSubmitted": 50,
+        "TasksCompleted": 50,
+        "TasksFailed": 0,
+        "TasksRetried": 0,
+        "TotalProcessingTime": 17857955,
+        "AverageProcessingTime": 357159,
+        "ActiveWorkers": 12,
+        "QueueLength": 0
+      }
+    }
+  ],
+  "timestamp": "2026-03-23T12:46:37.108088+07:00",
+  "total_tests": 5
+}

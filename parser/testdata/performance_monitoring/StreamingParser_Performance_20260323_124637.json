@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-03-23T12:46:37.086411+07:00",
+  "test_name": "StreamingParser_Performance",
+  "duration": 1309375,
+  "throughput_mbps": 384.29911102728823,
+  "memory_usage_mb": 2.5481643676757812,
+  "allocations_per_op": 1304,
+  "gc_pauses": [],
+  "cpu_usage_percent": 600,
+  "worker_pool_metrics": {
+    "TasksSubmitted": 0,
+    "TasksCompleted": 0,
+    "TasksFailed": 0,
+    "TasksRetried": 0,
+    "TotalProcessingTime": 0,
+    "AverageProcessingTime": 0,
+    "ActiveWorkers": 0,
+    "QueueLength": 0
+  },
+  "streaming_metrics": {
+    "buffer_size": 65536,
+    "chunks_processed": 81,
+    "bytes_processed": 297591,
+    "processing_time": 738500,
+    "memory_efficiency": 11.137621147748606,
+    "peak_memory_usage": 1314072
+  }
+}

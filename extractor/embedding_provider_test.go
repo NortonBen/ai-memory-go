@@ -1,0 +1,458 @@
+// Package extractor - EmbeddingProvider interface tests
+package extractor
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// MockEmbeddingProvider implements EmbeddingProvider for testing
+type MockEmbeddingProvider struct {
+	model      string
+	dimensions int
+	embeddings map[string][]float32
+	healthy    bool
+	usage      *EmbeddingUsageStats
+	rateLimit  *EmbeddingRateLimitStatus
+	config     *EmbeddingProviderConfig
+}
+
+// NewMockEmbeddingProvider creates a new mock embedding provider
+func NewMockEmbeddingProvider(model string, dimensions int) *MockEmbeddingProvider {
+	return &MockEmbeddingProvider{
+		model:      model,
+		dimensions: dimensions,
+		embeddings: make(map[string][]float32),
+		healthy:    true,
+		usage: &EmbeddingUsageStats{
+			TotalRequests:      0,
+			SuccessfulRequests: 0,
+			FailedRequests:     0,
+			PeriodStart:        time.Now(),
+			PeriodEnd:          time.Now(),
+		},
+		rateLimit: &EmbeddingRateLimitStatus{
+			RequestsPerMinute: 1000,
+			TokensPerMinute:   100000,
+			RequestsRemaining: 1000,
+			TokensRemaining:   100000,
+			IsLimited:         false,
+		},
+		config: DefaultEmbeddingProviderConfig(EmbeddingProviderLocal),
+	}
+}
+
+// Core embedding generation methods
+func (m *MockEmbeddingProvider) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	m.usage.TotalRequests++
+	m.usage.SuccessfulRequests++
+	m.usage.TotalTextsProcessed++
+
+	// Generate mock embedding
+	embedding := make([]float32, m.dimensions)
+	for i := range embedding {
+		embedding[i] = float32(i) / float32(m.dimensions)
+	}
+
+	m.embeddings[text] = embedding
+	return embedding, nil
+}
+
+func (m *MockEmbeddingProvider) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	embeddings := make([][]float32, len(texts))
+	for i, text := range texts {
+		embedding, err := m.GenerateEmbedding(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		embeddings[i] = embedding
+	}
+	return embeddings, nil
+}
+
+func (m *MockEmbeddingProvider) GenerateEmbeddingWithOptions(ctx context.Context, text string, options *EmbeddingOptions) ([]float32, error) {
+	return m.GenerateEmbedding(ctx, text)
+}
+
+func (m *MockEmbeddingProvider) GenerateBatchEmbeddingsWithOptions(ctx context.Context, texts []string, options *EmbeddingOptions) ([][]float32, error) {
+	return m.GenerateBatchEmbeddings(ctx, texts)
+}
+
+// Model and configuration information
+func (m *MockEmbeddingProvider) GetDimensions() int {
+	return m.dimensions
+}
+
+func (m *MockEmbeddingProvider) GetModel() string {
+	return m.model
+}
+
+func (m *MockEmbeddingProvider) SetModel(model string) error {
+	m.model = model
+	return nil
+}
+
+func (m *MockEmbeddingProvider) GetProviderType() EmbeddingProviderType {
+	return EmbeddingProviderLocal
+}
+
+func (m *MockEmbeddingProvider) GetSupportedModels() []string {
+	return []string{"mock-model-v1", "mock-model-v2"}
+}
+
+func (m *MockEmbeddingProvider) GetMaxBatchSize() int {
+	return 100
+}
+
+func (m *MockEmbeddingProvider) GetMaxTokensPerText() int {
+	return 512
+}
+
+// Performance and optimization methods
+func (m *MockEmbeddingProvider) GenerateEmbeddingCached(ctx context.Context, text string, ttl time.Duration) ([]float32, error) {
+	return m.GenerateEmbedding(ctx, text)
+}
+
+func (m *MockEmbeddingProvider) GenerateBatchEmbeddingsCached(ctx context.Context, texts []string, ttl time.Duration) ([][]float32, error) {
+	return m.GenerateBatchEmbeddings(ctx, texts)
+}
+
+func (m *MockEmbeddingProvider) DeduplicateAndEmbed(ctx context.Context, texts []string) (map[string][]float32, error) {
+	result := make(map[string][]float32)
+	seen := make(map[string]bool)
+
+	for _, text := range texts {
+		if !seen[text] {
+			embedding, err := m.GenerateEmbedding(ctx, text)
+			if err != nil {
+				return nil, err
+			}
+			result[text] = embedding
+			seen[text] = true
+		}
+	}
+
+	return result, nil
+}
+
+func (m *MockEmbeddingProvider) EstimateTokenCount(text string) (int, error) {
+	// Simple estimation: ~4 characters per token
+	return len(text) / 4, nil
+}
+
+func (m *MockEmbeddingProvider) EstimateCost(tokenCount int) (float64, error) {
+	// Mock cost: $0.0001 per token
+	return float64(tokenCount) * 0.0001, nil
+}
+
+// Health and monitoring methods
+func (m *MockEmbeddingProvider) Health(ctx context.Context) error {
+	if !m.healthy {
+		return NewExtractorError("health_check", "provider is unhealthy", 503)
+	}
+	return nil
+}
+
+func (m *MockEmbeddingProvider) GetUsage(ctx context.Context) (*EmbeddingUsageStats, error) {
+	return m.usage, nil
+}
+
+func (m *MockEmbeddingProvider) GetRateLimit(ctx context.Context) (*EmbeddingRateLimitStatus, error) {
+	return m.rateLimit, nil
+}
+
+// Configuration and lifecycle methods
+func (m *MockEmbeddingProvider) Configure(config *EmbeddingProviderConfig) error {
+	m.config = config
+	return nil
+}
+
+func (m *MockEmbeddingProvider) GetConfiguration() *EmbeddingProviderConfig {
+	return m.config
+}
+
+func (m *MockEmbeddingProvider) ValidateConfiguration(config *EmbeddingProviderConfig) error {
+	return ValidateEmbeddingProviderConfig(config)
+}
+
+func (m *MockEmbeddingProvider) Close() error {
+	return nil
+}
+
+// Advanced features
+func (m *MockEmbeddingProvider) SupportsStreaming() bool {
+	return false
+}
+
+func (m *MockEmbeddingProvider) GenerateStreamingEmbedding(ctx context.Context, text string, callback EmbeddingStreamCallback) error {
+	embedding, err := m.GenerateEmbedding(ctx, text)
+	if err != nil {
+		callback(nil, true, err)
+		return err
+	}
+	callback(embedding, true, nil)
+	return nil
+}
+
+func (m *MockEmbeddingProvider) SupportsCustomDimensions() bool {
+	return true
+}
+
+func (m *MockEmbeddingProvider) SetCustomDimensions(dimensions int) error {
+	m.dimensions = dimensions
+	return nil
+}
+
+func (m *MockEmbeddingProvider) GetCapabilities() *EmbeddingProviderCapabilities {
+	return &EmbeddingProviderCapabilities{
+		SupportsBatching:      true,
+		SupportsStreaming:     false,
+		SupportsCustomDims:    true,
+		SupportsNormalization: true,
+		MaxTokensPerText:      512,
+		MaxBatchSize:          100,
+		SupportedModels:       []string{"mock-model-v1", "mock-model-v2"},
+		DefaultModel:          "mock-model-v1",
+		SupportedDimensions:   []int{128, 256, 384, 768},
+		DefaultDimension:      384,
+		SupportsRateLimiting:  false,
+		SupportsUsageTracking: true,
+		SupportsCaching:       true,
+		SupportsDeduplication: true,
+		SupportedInputTypes:   []string{"text"},
+		SupportsFineTuning:    false,
+		SupportsCustomModels:  true,
+	}
+}
+
+// Test EmbeddingProvider interface compliance
+func TestEmbeddingProviderInterface(t *testing.T) {
+	provider := NewMockEmbeddingProvider("test-model", 384)
+	ctx := context.Background()
+
+	// Test basic embedding generation
+	t.Run("GenerateEmbedding", func(t *testing.T) {
+		text := "This is a test text"
+		embedding, err := provider.GenerateEmbedding(ctx, text)
+
+		require.NoError(t, err)
+		assert.Len(t, embedding, 384)
+		assert.Equal(t, float32(0), embedding[0])
+	})
+
+	// Test batch embedding generation
+	t.Run("GenerateBatchEmbeddings", func(t *testing.T) {
+		texts := []string{"text1", "text2", "text3"}
+		embeddings, err := provider.GenerateBatchEmbeddings(ctx, texts)
+
+		require.NoError(t, err)
+		assert.Len(t, embeddings, 3)
+		for _, embedding := range embeddings {
+			assert.Len(t, embedding, 384)
+		}
+	})
+
+	// Test model information
+	t.Run("ModelInformation", func(t *testing.T) {
+		assert.Equal(t, "test-model", provider.GetModel())
+		assert.Equal(t, 384, provider.GetDimensions())
+		assert.Equal(t, EmbeddingProviderLocal, provider.GetProviderType())
+		assert.Equal(t, []string{"mock-model-v1", "mock-model-v2"}, provider.GetSupportedModels())
+		assert.Equal(t, 100, provider.GetMaxBatchSize())
+		assert.Equal(t, 512, provider.GetMaxTokensPerText())
+	})
+
+	// Test health check
+	t.Run("HealthCheck", func(t *testing.T) {
+		err := provider.Health(ctx)
+		assert.NoError(t, err)
+	})
+
+	// Test usage statistics
+	t.Run("UsageStatistics", func(t *testing.T) {
+		usage, err := provider.GetUsage(ctx)
+		require.NoError(t, err)
+		assert.NotNil(t, usage)
+		assert.True(t, usage.TotalRequests > 0)
+	})
+
+	// Test rate limit status
+	t.Run("RateLimitStatus", func(t *testing.T) {
+		rateLimit, err := provider.GetRateLimit(ctx)
+		require.NoError(t, err)
+		assert.NotNil(t, rateLimit)
+		assert.Equal(t, 1000, rateLimit.RequestsPerMinute)
+	})
+
+	// Test configuration
+	t.Run("Configuration", func(t *testing.T) {
+		config := provider.GetConfiguration()
+		assert.NotNil(t, config)
+
+		newConfig := DefaultEmbeddingProviderConfig(EmbeddingProviderLocal)
+		err := provider.Configure(newConfig)
+		assert.NoError(t, err)
+	})
+
+	// Test capabilities
+	t.Run("Capabilities", func(t *testing.T) {
+		caps := provider.GetCapabilities()
+		assert.NotNil(t, caps)
+		assert.True(t, caps.SupportsBatching)
+		assert.True(t, caps.SupportsCustomDims)
+		assert.Equal(t, 100, caps.MaxBatchSize)
+	})
+
+	// Test deduplication
+	t.Run("DeduplicateAndEmbed", func(t *testing.T) {
+		texts := []string{"text1", "text2", "text1", "text3", "text2"}
+		result, err := provider.DeduplicateAndEmbed(ctx, texts)
+
+		require.NoError(t, err)
+		assert.Len(t, result, 3) // Should have only unique texts
+		assert.Contains(t, result, "text1")
+		assert.Contains(t, result, "text2")
+		assert.Contains(t, result, "text3")
+	})
+
+	// Test token estimation
+	t.Run("TokenEstimation", func(t *testing.T) {
+		text := "This is a test text with some words"
+		tokenCount, err := provider.EstimateTokenCount(text)
+
+		require.NoError(t, err)
+		assert.Greater(t, tokenCount, 0)
+
+		cost, err := provider.EstimateCost(tokenCount)
+		require.NoError(t, err)
+		assert.Greater(t, cost, 0.0)
+	})
+}
+
+// Test EmbeddingProviderConfig validation
+func TestEmbeddingProviderConfigValidation(t *testing.T) {
+	t.Run("ValidConfig", func(t *testing.T) {
+		config := DefaultEmbeddingProviderConfig(EmbeddingProviderOpenAI)
+		config.APIKey = "test-key"
+
+		err := ValidateEmbeddingProviderConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("NilConfig", func(t *testing.T) {
+		err := ValidateEmbeddingProviderConfig(nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "config is nil")
+	})
+
+	t.Run("MissingType", func(t *testing.T) {
+		config := &EmbeddingProviderConfig{
+			Model: "test-model",
+		}
+
+		err := ValidateEmbeddingProviderConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type is required")
+	})
+
+	t.Run("MissingModel", func(t *testing.T) {
+		config := &EmbeddingProviderConfig{
+			Type: EmbeddingProviderOpenAI,
+		}
+
+		err := ValidateEmbeddingProviderConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "model is required")
+	})
+
+	t.Run("MissingAPIKey", func(t *testing.T) {
+		config := &EmbeddingProviderConfig{
+			Type:  EmbeddingProviderOpenAI,
+			Model: "text-embedding-3-small",
+		}
+
+		err := ValidateEmbeddingProviderConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "requires API key")
+	})
+}
+
+// Test default configurations
+func TestDefaultEmbeddingProviderConfigs(t *testing.T) {
+	providers := []EmbeddingProviderType{
+		EmbeddingProviderOpenAI,
+		EmbeddingProviderOllama,
+		EmbeddingProviderLocal,
+		EmbeddingProviderCohere,
+	}
+
+	for _, providerType := range providers {
+		t.Run(string(providerType), func(t *testing.T) {
+			config := DefaultEmbeddingProviderConfig(providerType)
+
+			assert.Equal(t, providerType, config.Type)
+			assert.NotEmpty(t, config.Model)
+			assert.Greater(t, config.Dimensions, 0)
+			assert.Greater(t, config.MaxBatchSize, 0)
+			assert.NotNil(t, config.DefaultOptions)
+			assert.True(t, config.Features.EnableCaching)
+		})
+	}
+}
+
+// Test embedding provider capabilities
+func TestEmbeddingProviderCapabilities(t *testing.T) {
+	capabilitiesMap := GetEmbeddingProviderCapabilitiesMap()
+
+	assert.NotEmpty(t, capabilitiesMap)
+
+	for providerType, capabilities := range capabilitiesMap {
+		t.Run(string(providerType), func(t *testing.T) {
+			assert.NotNil(t, capabilities)
+			assert.Greater(t, capabilities.MaxTokensPerText, 0)
+			assert.Greater(t, capabilities.MaxBatchSize, 0)
+			assert.NotEmpty(t, capabilities.SupportedModels)
+			assert.NotEmpty(t, capabilities.DefaultModel)
+			assert.Greater(t, capabilities.DefaultDimension, 0)
+			assert.NotEmpty(t, capabilities.SupportedDimensions)
+		})
+	}
+}
+
+// Test embedding options
+func TestEmbeddingOptions(t *testing.T) {
+	t.Run("DefaultOptions", func(t *testing.T) {
+		options := DefaultEmbeddingOptions()
+
+		assert.NotNil(t, options)
+		assert.True(t, options.Normalize)
+		assert.True(t, options.Truncate)
+		assert.Equal(t, 100, options.BatchSize)
+		assert.Equal(t, 60*time.Second, options.Timeout)
+		assert.Equal(t, 3, options.MaxRetries)
+		assert.True(t, options.EnableCaching)
+		assert.Equal(t, 24*time.Hour, options.CacheTTL)
+		assert.NotNil(t, options.CustomOptions)
+	})
+}
+
+// Test retry configuration
+func TestEmbeddingRetryConfig(t *testing.T) {
+	t.Run("DefaultRetryConfig", func(t *testing.T) {
+		config := DefaultEmbeddingRetryConfig()
+
+		assert.NotNil(t, config)
+		assert.Equal(t, 3, config.MaxAttempts)
+		assert.Equal(t, 1*time.Second, config.InitialDelay)
+		assert.Equal(t, 30*time.Second, config.MaxDelay)
+		assert.Equal(t, 2.0, config.BackoffMultiplier)
+		assert.True(t, config.Jitter)
+		assert.NotEmpty(t, config.RetryableErrors)
+		assert.Contains(t, config.RetryableErrors, "rate_limit")
+		assert.Contains(t, config.RetryableErrors, "timeout")
+	})
+}

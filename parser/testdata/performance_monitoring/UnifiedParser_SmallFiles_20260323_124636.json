@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-23T12:46:36.676015+07:00",
+  "test_name": "UnifiedParser_SmallFiles",
+  "duration": 1362000,
+  "throughput_mbps": 48.083523387279904,
+  "memory_usage_mb": 0.60455322265625,
+  "allocations_per_op": 1801,
+  "gc_pauses": [],
+  "cpu_usage_percent": 600,
+  "worker_pool_metrics": {
+    "TasksSubmitted": 20,
+    "TasksCompleted": 20,
+    "TasksFailed": 0,
+    "TasksRetried": 0,
+    "TotalProcessingTime": 3339543,
+    "AverageProcessingTime": 166977,
+    "ActiveWorkers": 12,
+    "QueueLength": 0
+  }
+}

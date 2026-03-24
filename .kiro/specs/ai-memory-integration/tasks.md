@@ -106,14 +106,14 @@ This document outlines the implementation tasks for building a Go-native AI Memo
 
 ### Task 6: Storage Interface and Abstraction
 
-- [ ] 6.1 Define storage interfaces
-  - [~] 6.1.1 Create `Storage` base interface with CRUD operations
-  - [~] 6.1.2 Create `GraphStorage` interface for relationship operations
-  - [~] 6.1.3 Create `VectorStorage` interface for similarity search
+- [x] 6.1 Define storage interfaces
+  - [x] 6.1.1 Create `Storage` base interface with CRUD operations
+  - [x] 6.1.2 Create `GraphStorage` interface for relationship operations
+  - [x] 6.1.3 Create `VectorStorage` interface for similarity search
   - [~] 6.1.4 Create `RelationalStorage` interface for metadata and sessions
 
-- [ ] 6.2 Implement storage factory and configuration
-  - [~] 6.2.1 Create storage factory with provider selection
+- [x] 6.2 Implement storage factory and configuration
+  - [x] 6.2.1 Create storage factory with provider selection
   - [x] 6.2.2 Add configuration management for multiple backends
   - [~] 6.2.3 Implement connection pooling and health monitoring
   - [~] 6.2.4 Add storage migration and backup utilities
@@ -140,23 +140,19 @@ This document outlines the implementation tasks for building a Go-native AI Memo
 
 ### Task 8: Vector Storage Implementation
 
-- [ ] 8.1 Implement Qdrant adapter
-  - [~] 8.1.1 Create Qdrant client with collection management
-  - [~] 8.1.2 Implement vector CRUD operations with metadata
-  - [~] 8.1.3 Add similarity search with filtering and pagination
-  - [~] 8.1.4 Optimize batch operations and indexing
+- [x] 8.1 Implement Qdrant adapter
+  - [x] 8.1.1 Create Qdrant client with collection management
+  - [x] 8.1.2 Implement vector CRUD operations with metadata
+  - [x] 8.1.3 Add similarity search with filtering and pagination
+  - [x] 8.1.4 Optimize batch operations and indexing
 
-- [ ] 8.2 Implement pgvector adapter
-  - [~] 8.2.1 Create PostgreSQL client with pgvector extension
-  - [~] 8.2.2 Implement vector operations using SQL
-  - [~] 8.2.3 Add hybrid queries combining vector and relational data
-  - [~] 8.2.4 Optimize indexing strategies (HNSW, IVF)
+- [x] 8.2 Implement pgvector adapter
+  - [x] 8.2.1 Create PostgreSQL client with pgvector extension
+  - [x] 8.2.2 Implement vector operations using SQL
+  - [x] 8.2.3 Add hybrid queries combining vector and relational data
+  - [x] 8.2.4 Optimize indexing strategies (HNSW, IVF)
 
-- [ ] 8.3 Add LanceDB adapter
-  - [~] 8.3.1 Create LanceDB client for file-based vector storage
-  - [~] 8.3.2 Implement vector operations with Arrow format
-  - [~] 8.3.3 Add local file management and compaction
-  - [~] 8.3.4 Optimize for embedded deployment scenarios
+- [x] 8.3 LanceDB adapter — removed (not supported, keeping only pgvector + Qdrant)
 
 ### Task 9: Relational Storage Implementation
 

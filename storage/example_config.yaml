@@ -1,0 +1,333 @@
+# AI Memory Integration - Storage Configuration Example
+# This file demonstrates comprehensive configuration for multiple storage backends
+
+# Global storage settings
+environment: "production"
+enable_transactions: true
+connection_timeout: "30s"
+query_timeout: "30s"
+max_retries: 3
+
+# Configuration profiles for different deployment scenarios
+profiles:
+  development: "file-based"
+  staging: "hybrid"
+  production: "cloud"
+
+# Relational database configuration (PostgreSQL/SQLite)
+relational:
+  type: "postgresql"
+  host: "localhost"
+  port: 5432
+  database: "ai_memory"
+  username: "memory_user"
+  password: "${AI_MEMORY_DB_PASSWORD}"
+  ssl_mode: "require"
+  
+  # Connection pooling
+  max_connections: 50
+  min_connections: 5
+  conn_timeout: "30s"
+  idle_timeout: "5m"
+  max_lifetime: "1h"
+  
+  # Performance settings
+  batch_size: 1000
+  enable_full_text: true
+  enable_json_indexes: true
+
+# Graph database configuration
+graph:
+  type: "neo4j"
+  host: "localhost"
+  port: 7687
+  database: "neo4j"
+  username: "neo4j"
+  password: "${AI_MEMORY_NEO4J_PASSWORD}"
+  
+  # Connection pooling
+  max_connections: 20
+  conn_timeout: "30s"
+  idle_timeout: "5m"
+  
+  # Performance settings
+  batch_size: 500
+  enable_indexing: true
+  enable_caching: true
+  
+  # Neo4j-specific configuration
+  neo4j:
+    uri: "bolt://localhost:7687"
+    realm: ""
+    user_agent: "ai-memory-go/1.0"
+    max_connection_life: "30m"
+    max_connection_pool: 20
+    connection_timeout: "30s"
+    socket_timeout: "60s"
+    encryption_level: "required"
+    trust_strategy: "trust_system_ca_signed_certificates"
+    enable_bookmarks: true
+    enable_routing: true
+    enable_metrics: true
+    default_database: "neo4j"
+
+# Vector database configuration
+vector:
+  type: "qdrant"
+  host: "localhost"
+  port: 6333
+  collection: "memory_vectors"
+  
+  # Vector-specific settings
+  dimension: 768
+  distance_metric: "cosine"
+  index_type: "hnsw"
+  
+  # Connection pooling
+  max_connections: 20
+  conn_timeout: "30s"
+  idle_timeout: "5m"
+  
+  # Performance settings
+  batch_size: 100
+  enable_caching: true
+  
+  # Qdrant-specific configuration
+  qdrant:
+    host: "localhost"
+    port: 6333
+    api_key: "${AI_MEMORY_QDRANT_API_KEY}"
+    timeout: "30s"
+    max_connections: 20
+    enable_tls: true
+    enable_grpc: true
+    grpc_port: 6334
+    compression_level: "gzip"
+    default_vector_size: 768
+    default_distance: "cosine"
+    on_disk_payload: true
+    max_segment_size: 4194304  # 4MB
+    memmap_threshold: 1048576  # 1MB
+    indexing_threshold: 20000
+
+---
+# Alternative configuration for file-based deployment
+environment: "embedded"
+enable_transactions: true
+connection_timeout: "10s"
+query_timeout: "30s"
+max_retries: 2
+
+relational:
+  type: "sqlite"
+  database: "./data/memory.db"
+  max_connections: 5
+  min_connections: 1
+  batch_size: 100
+  enable_full_text: true
+  enable_json_indexes: true
+
+graph:
+  type: "kuzu"
+  batch_size: 100
+  enable_indexing: true
+  enable_caching: true
+  
+  kuzu:
+    database_path: "./data/graph.kuzu"
+    buffer_pool_size: 268435456  # 256MB
+    max_num_threads: 4
+    enable_compression: true
+    checkpoint_wait_timeout: "30s"
+    enable_checkpoint: true
+    log_level: "info"
+    hash_join_size_ratio: 1.5
+    enable_semi_mask: true
+    enable_zone_map: true
+    enable_progress_bar: false
+
+vector:
+  type: "lancedb"
+  dimension: 768
+  distance_metric: "cosine"
+  index_type: "hnsw"
+  batch_size: 100
+  enable_caching: true
+  
+  lancedb:
+    uri: "./data/vectors.lance"
+    storage_type: "local"
+    data_dir: "./data"
+    table_name: "embeddings"
+    block_size: 8192
+    max_rows_per_file: 1000000
+    max_rows_per_group: 10000
+    max_bytes_per_file: 1073741824  # 1GB
+    index_cache_size: 100
+    metric_type: "cosine"
+    enable_statistics: true
+    enable_bloom_filter: true
+
+---
+# Hybrid configuration using SurrealDB for both graph and vector
+environment: "hybrid"
+enable_transactions: true
+connection_timeout: "30s"
+query_timeout: "45s"
+max_retries: 3
+
+relational:
+  type: "postgresql"
+  host: "localhost"
+  port: 5432
+  database: "ai_memory_hybrid"
+  username: "memory_user"
+  password: "${AI_MEMORY_DB_PASSWORD}"
+  ssl_mode: "require"
+  max_connections: 30
+  min_connections: 3
+  batch_size: 500
+
+graph:
+  type: "surrealdb"
+  host: "localhost"
+  port: 8000
+  database: "memory"
+  username: "root"
+  password: "${AI_MEMORY_SURREALDB_PASSWORD}"
+  max_connections: 15
+  batch_size: 200
+  
+  surrealdb:
+    endpoint: "ws://localhost:8000/rpc"
+    namespace: "ai_memory"
+    database: "memory"
+    scope: ""
+    timeout: "30s"
+    max_connections: 15
+    enable_tls: false
+    enable_livequeries: true
+    enable_transactions: true
+    strict_mode: false
+
+vector:
+  type: "pgvector"
+  host: "localhost"
+  port: 5432
+  database: "ai_memory_vectors"
+  username: "vector_user"
+  password: "${AI_MEMORY_VECTOR_DB_PASSWORD}"
+  dimension: 768
+  distance_metric: "cosine"
+  index_type: "hnsw"
+  max_connections: 15
+  batch_size: 100
+  
+  pgvector:
+    host: "localhost"
+    port: 5432
+    database: "ai_memory_vectors"
+    username: "vector_user"
+    password: "${AI_MEMORY_VECTOR_DB_PASSWORD}"
+    ssl_mode: "require"
+    max_connections: 15
+    min_connections: 2
+    max_conn_lifetime: "1h"
+    max_conn_idle_time: "10m"
+    health_check_period: "1m"
+    vector_dimensions: 768
+    index_type: "hnsw"
+    table_name: "embeddings"
+    vector_column: "embedding"
+    metadata_column: "metadata"
+    maintenance_work_mem: "256MB"
+    max_parallel_workers: 4
+    effective_cache_size: "1GB"
+
+---
+# Redis-based vector configuration
+environment: "redis_vectors"
+enable_transactions: true
+
+relational:
+  type: "sqlite"
+  database: "./data/memory.db"
+  max_connections: 5
+
+graph:
+  type: "inmemory"
+  max_connections: 1
+  batch_size: 100
+
+vector:
+  type: "redis"
+  host: "localhost"
+  port: 6379
+  database: 0
+  dimension: 768
+  distance_metric: "cosine"
+  index_type: "hnsw"
+  max_connections: 10
+  batch_size: 50
+  
+  redis:
+    host: "localhost"
+    port: 6379
+    password: "${AI_MEMORY_REDIS_PASSWORD}"
+    database: 0
+    pool_size: 10
+    min_idle_conns: 2
+    max_conn_age: "30m"
+    pool_timeout: "5s"
+    idle_timeout: "5m"
+    idle_check_frequency: "1m"
+    max_retries: 3
+    min_retry_backoff: "100ms"
+    max_retry_backoff: "3s"
+    dial_timeout: "5s"
+    read_timeout: "3s"
+    write_timeout: "3s"
+    index_name: "vector_index"
+    vector_field: "embedding"
+    vector_algorithm: "HNSW"
+    vector_type: "FLOAT32"
+    hnsw_max_connections: 16
+    hnsw_ef_construction: 200
+    hnsw_ef_runtime: 10
+
+---
+# ChromaDB configuration
+environment: "chromadb"
+enable_transactions: true
+
+relational:
+  type: "sqlite"
+  database: "./data/memory.db"
+  max_connections: 5
+
+graph:
+  type: "inmemory"
+  max_connections: 1
+
+vector:
+  type: "chromadb"
+  host: "localhost"
+  port: 8000
+  dimension: 768
+  distance_metric: "cosine"
+  max_connections: 10
+  batch_size: 100
+  
+  chromadb:
+    host: "localhost"
+    port: 8000
+    api_key: "${AI_MEMORY_CHROMADB_API_KEY}"
+    timeout: "30s"
+    max_connections: 10
+    enable_tls: false
+    tenant: "default_tenant"
+    database: "default_database"
+    default_collection_name: "memory_vectors"
+    batch_size: 100
+    enable_persistence: true
+    persist_directory: "./data/chromadb"

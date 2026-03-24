@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-03-23T12:46:36.821467+07:00",
+  "test_name": "CachedParser_Performance",
+  "duration": 4897917,
+  "throughput_mbps": 52.26999331211347,
+  "memory_usage_mb": 11.935920715332031,
+  "allocations_per_op": 13726,
+  "gc_pauses": [],
+  "cpu_usage_percent": 600,
+  "worker_pool_metrics": {
+    "TasksSubmitted": 0,
+    "TasksCompleted": 0,
+    "TasksFailed": 0,
+    "TasksRetried": 0,
+    "TotalProcessingTime": 0,
+    "AverageProcessingTime": 0,
+    "ActiveWorkers": 0,
+    "QueueLength": 0
+  },
+  "cache_metrics": {
+    "hits": 10,
+    "misses": 10,
+    "evictions": 0,
+    "total_entries": 10,
+    "memory_usage_bytes": 180658,
+    "hit_rate": 0.5,
+    "average_access_time": 124805,
+    "last_cleanup": "0001-01-01T00:00:00Z",
+    "compression_ratio": 0.08311719651169484,
+    "persistence_operations": 0,
+    "last_persistence": "0001-01-01T00:00:00Z",
+    "concurrent_operations": 0,
+    "max_concurrent_operations": 1,
+    "warmup_time": 0,
+    "error_count": 0
+  }
+}

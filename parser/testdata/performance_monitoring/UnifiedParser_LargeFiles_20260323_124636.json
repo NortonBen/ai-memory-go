@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-23T12:46:36.80457+07:00",
+  "test_name": "UnifiedParser_LargeFiles",
+  "duration": 1400709,
+  "throughput_mbps": 392.39033497582767,
+  "memory_usage_mb": 3.2444229125976562,
+  "allocations_per_op": 8364,
+  "gc_pauses": [],
+  "cpu_usage_percent": 600,
+  "worker_pool_metrics": {
+    "TasksSubmitted": 5,
+    "TasksCompleted": 5,
+    "TasksFailed": 0,
+    "TasksRetried": 0,
+    "TotalProcessingTime": 3341334,
+    "AverageProcessingTime": 668266,
+    "ActiveWorkers": 12,
+    "QueueLength": 0
+  }
+}

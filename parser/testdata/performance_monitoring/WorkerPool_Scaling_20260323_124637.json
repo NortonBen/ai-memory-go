@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-03-23T12:46:37.107948+07:00",
+  "test_name": "WorkerPool_Scaling",
+  "duration": 2390291,
+  "throughput_mbps": 163.03937928193912,
+  "memory_usage_mb": 3.8579025268554688,
+  "allocations_per_op": 9864,
+  "gc_pauses": [],
+  "cpu_usage_percent": 600,
+  "worker_pool_metrics": {
+    "TasksSubmitted": 50,
+    "TasksCompleted": 50,
+    "TasksFailed": 0,
+    "TasksRetried": 0,
+    "TotalProcessingTime": 17857955,
+    "AverageProcessingTime": 357159,
+    "ActiveWorkers": 12,
+    "QueueLength": 0
+  }
+}
