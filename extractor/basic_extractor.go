@@ -386,3 +386,90 @@ Return a JSON object with a "relationship" object. It should have:
 
 	return edge, nil
 }
+
+// CompareEntities compares a new entity against an existing similar entity and determines consistency action deterministically without an LLM
+func (be *BasicExtractor) CompareEntities(ctx context.Context, existing schema.Node, newEntity schema.Node) (*schema.ConsistencyResult, error) {
+	// Rule 1: Type mismatch -> Different entities (KEEP_SEPARATE)
+	if !strings.EqualFold(string(existing.Type), string(newEntity.Type)) {
+		return &schema.ConsistencyResult{
+			Action: schema.ResolutionKeepSeparate,
+			Reason: fmt.Sprintf("Entity types differ: '%s' vs '%s'", existing.Type, newEntity.Type),
+		}, nil
+	}
+
+	// Rule 2: Compare Name equivalence
+	existName := extractName(existing.Properties)
+	newName := extractName(newEntity.Properties)
+
+	// If both have names but they differ significantly, they are different entities
+	if existName != "" && newName != "" && !strings.EqualFold(strings.TrimSpace(existName), strings.TrimSpace(newName)) {
+		return &schema.ConsistencyResult{
+			Action: schema.ResolutionKeepSeparate,
+			Reason: fmt.Sprintf("Entity names differ: '%s' vs '%s'", existName, newName),
+		}, nil
+	}
+
+	// Rule 3: Types match, and names match (or are empty). Now deeply compare properties.
+	hasNewInfo := false
+	mergedData := make(map[string]interface{})
+
+	// Copy existing properties
+	for k, v := range existing.Properties {
+		mergedData[k] = v
+	}
+
+	// Compare with new properties
+	for k, newV := range newEntity.Properties {
+		if existV, exists := existing.Properties[k]; exists {
+			// Compare string representation to avoid complex type casting issues
+			if fmt.Sprintf("%v", existV) != fmt.Sprintf("%v", newV) {
+				// We consider this a CONTRADICTION if an existing property value differs.
+				return &schema.ConsistencyResult{
+					Action: schema.ResolutionContradict,
+					Reason: fmt.Sprintf("Property '%s' conflicts. Existing: '%v', New: '%v'", k, existV, newV),
+				}, nil
+			}
+		} else {
+			hasNewInfo = true
+			mergedData[k] = newV
+		}
+	}
+
+	if hasNewInfo {
+		return &schema.ConsistencyResult{
+			Action:     schema.ResolutionUpdate,
+			Reason:     "New entity contains additional properties",
+			MergedData: mergedData,
+		}, nil
+	}
+
+	// No conflicts, no new info -> IGNORE
+	return &schema.ConsistencyResult{
+		Action: schema.ResolutionIgnore,
+		Reason: "New entity provides no new information",
+	}, nil
+}
+
+// extractName is a helper to find a name-like property for comparison
+func extractName(props map[string]interface{}) string {
+	if props == nil {
+		return ""
+	}
+	if name, ok := props["name"].(string); ok {
+		return name
+	}
+	if title, ok := props["title"].(string); ok {
+		return title
+	}
+	if id, ok := props["id"].(string); ok {
+		return id
+	}
+	
+	// Handle arrays natively created by JSON Unmarshal (e.g. from LLM extraction output)
+	if names, ok := props["name"].([]interface{}); ok && len(names) > 0 {
+		if str, ok := names[0].(string); ok {
+			return str
+		}
+	}
+	return ""
+}

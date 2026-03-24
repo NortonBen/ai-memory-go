@@ -24,7 +24,7 @@ func main() {
 
 func run() {
 	ctx := context.Background()
-	os.RemoveAll("./data/noisy_data")
+	// os.RemoveAll("./data/noisy_data")
 	_ = os.MkdirAll("./data/noisy_data", 0o750)
 
 	// ─── 1. LM Studio Initialization ──────────────────────────────────────────

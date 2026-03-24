@@ -1,6 +1,6 @@
 # AI Memory Brain - Architecture Overview
 
-This document provides a comprehensive architectural analysis and data flow specification for the `ai-memory-go` integration project. 
+This document provides a comprehensive architectural analysis and data flow specification for the `ai-memory-go` integration project.
 
 The system implements a unified "Memory Engine" that ingests text, extracts entities/relationships using Large Language Models (LLMs), generates vector embeddings, and stores this data in a hybrid graph-vector storage backend for semantic and relational retrieval.
 
@@ -30,9 +30,9 @@ graph TD
 
 The system operates on three distinct layers of data:
 
-1.  **DataPoint (Relational):** Represents the raw input text, metadata, and processing state.
-2.  **Node & Edge (Graph):** Represents the extracted concepts and their relationships.
-3.  **Vector (Embedding):** Represents the semantic mathematical representation of the text or extracted chunks.
+1. **DataPoint (Relational):** Represents the raw input text, metadata, and processing state.
+2. **Node & Edge (Graph):** Represents the extracted concepts and their relationships.
+3. **Vector (Embedding):** Represents the semantic mathematical representation of the text or extracted chunks.
 
 ```mermaid
 erDiagram
@@ -143,8 +143,8 @@ sequenceDiagram
 
 ## Package Dependencies & Capabilities
 
--   **`extractor`**: Abstraction over large language models for structured entity extraction. Implements `Anthropic`, `DeepSeek`, `Gemini`, `Ollama`, and `OpenAI`.
--   **`vector`**: Abstraction over embedding models and vector databases. Implements `AutoEmbedder` (with local caching and fallbacks), `Ollama`, `OpenAI`, and `OpenRouter` providers. Storage backends include `SQLite` (`sqlite-vec`), `Qdrant`, and `PgVector`.
--   **`graph`**: Abstraction over knowledge graph operations (node creation, edge linking, recursive BFS traversal). Implements `SQLite` (Recursive CTE) and `Neo4j`.
--   **`storage`**: Traditional relational data store for the primary `DataPoint` tracking, implementing `SQLite` and `PostgreSQL`.
--   **`engine`**: The overall orchestrator wrapping the extractor, embedder, and storage layers, maintaining a concurrent `WorkerPool`.
+- **`extractor`**: Abstraction over large language models for structured entity extraction. Implements `Anthropic`, `DeepSeek`, `Gemini`, `Ollama`, and `OpenAI`.
+- **`vector`**: Abstraction over embedding models and vector databases. Implements `AutoEmbedder` (with local caching and fallbacks), `Ollama`, `OpenAI`, and `OpenRouter` providers. Storage backends include `SQLite` (`sqlite-vec`), `Qdrant`, and `PgVector`.
+- **`graph`**: Abstraction over knowledge graph operations (node creation, edge linking, recursive BFS traversal). Implements `SQLite` (Recursive CTE) and `Neo4j`.
+- **`storage`**: Traditional relational data store for the primary `DataPoint` tracking, implementing `SQLite` and `PostgreSQL`.
+- **`engine`**: The overall orchestrator wrapping the extractor, embedder, and storage layers, maintaining a concurrent `WorkerPool`.

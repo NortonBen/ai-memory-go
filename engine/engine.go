@@ -23,9 +23,10 @@ type EngineConfig struct {
 
 // AddOptions holds optional parameters for the Add operation
 type AddOptions struct {
-	SessionID         string
-	Metadata          map[string]interface{}
-	WaitUntilComplete bool
+	SessionID            string
+	Metadata             map[string]interface{}
+	WaitUntilComplete    bool
+	ConsistencyThreshold float32
 }
 
 // AddOption configures AddOptions
@@ -47,6 +48,13 @@ func WithMetadata(metadata map[string]interface{}) AddOption {
 func WithWaitAdd(wait bool) AddOption {
 	return func(o *AddOptions) {
 		o.WaitUntilComplete = wait
+	}
+}
+
+// WithConsistencyThreshold sets the vector distance threshold for invoking consistency reasoning (e.g. 0.1)
+func WithConsistencyThreshold(threshold float32) AddOption {
+	return func(o *AddOptions) {
+		o.ConsistencyThreshold = threshold
 	}
 }
 
@@ -175,6 +183,17 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		}
 	}
 
+	// Deduplication: Check if this exact content already exists for this session
+	searchQuery := &storage.DataPointQuery{
+		SearchText: content,
+		SearchMode: "exact",
+		SessionID:  sessionID,
+		Limit:      1,
+	}
+	if existingMatches, err := e.store.QueryDataPoints(ctx, searchQuery); err == nil && len(existingMatches) > 0 {
+		return existingMatches[0], nil
+	}
+
 	dp := &schema.DataPoint{
 		ID:               uuid.New().String(),
 		Content:          content,
@@ -193,7 +212,8 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 	}
 
 	task := &AddTask{
-		DataPoint: dp,
+		DataPoint:            dp,
+		ConsistencyThreshold: options.ConsistencyThreshold,
 	}
 
 	if options.WaitUntilComplete {
@@ -342,10 +362,22 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 	vecResults, err := e.vectorStore.SimilaritySearch(ctx, emb, query.Limit, threshold)
 	if err == nil {
 		for _, vr := range vecResults {
-			if item := trackDataPoint(vr.ID); item != nil {
-				item.vectorScore = vr.Score
+			// vr.ID could be a DataPoint ID, or "entity-xxxx"
+			sourceID := vr.ID
+			if isEntity, ok := vr.Metadata["is_entity"].(bool); ok && isEntity {
+				if sid, ok := vr.Metadata["source_id"].(string); ok {
+					sourceID = sid
+				}
+			}
+
+			if item := trackDataPoint(sourceID); item != nil {
+				// If multiple vectors match the same datapoint, track the best score
+				if vr.Score > item.vectorScore {
+					item.vectorScore = vr.Score
+				}
+				
 				// Treat the Graph Nodes linked to this DataPoint as Graph Anchors!
-				linkedNodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", vr.ID)
+				linkedNodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", sourceID)
 				if err == nil {
 					for _, ln := range linkedNodes {
 						anchorNodeIDs[ln.ID] = true

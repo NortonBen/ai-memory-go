@@ -273,7 +273,10 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery)
 		args = append(args, q.ContentType)
 	}
 	if q.SearchText != "" {
-		if sa.config.EnableFullText && (q.SearchMode == "fulltext" || q.SearchMode == "") {
+		if q.SearchMode == "exact" {
+			queryStr += " AND content = ?"
+			args = append(args, q.SearchText)
+		} else if sa.config.EnableFullText && (q.SearchMode == "fulltext" || q.SearchMode == "") {
 			queryStr = `
 			SELECT d.id, d.content, d.content_type, d.metadata, d.session_id, d.user_id,
 				d.created_at, d.updated_at, d.processing_status, d.error_message

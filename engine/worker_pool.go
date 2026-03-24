@@ -21,7 +21,8 @@ type WorkerTask interface {
 // AddTask is responsible for processing a new memory DataPoint.
 // It extracts entities, generates embeddings, and saves relationships.
 type AddTask struct {
-	DataPoint *schema.DataPoint
+	DataPoint            *schema.DataPoint
+	ConsistencyThreshold float32
 }
 
 // Execute performs the extraction and embedding logic for AddTask.
@@ -56,12 +57,82 @@ func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb v
 		return t.fail(ctx, store, fmt.Errorf("entity extraction failed: %w", err))
 	}
 
+	var extraEdges []schema.Edge
+
 	// 2b. Store Graph Nodes into GraphStore if provided
 	if graphStore != nil {
 		for i := range nodes {
-			err = graphStore.StoreNode(ctx, &nodes[i])
+			node := &nodes[i]
+
+			// Assign source_id so graph traversal knows which DataPoint created this node
+			if node.Properties == nil {
+				node.Properties = make(map[string]interface{})
+			}
+			node.Properties["source_id"] = t.DataPoint.ID
+
+			// --- Consistency Reasoning ---
+			if t.ConsistencyThreshold > 0 && vectorStore != nil {
+				// Embed node context for similarity comparison
+				nodeContent := fmt.Sprintf("Entity: %s\nType: %s\nProperties: %v", node.ID, node.Type, node.Properties)
+				nodeEmb, err := emb.GenerateEmbedding(ctx, nodeContent)
+				if err == nil {
+					// Search for similar entities
+					filters := map[string]interface{}{"is_entity": true}
+					vecResults, err := vectorStore.SimilaritySearchWithFilter(ctx, nodeEmb, filters, 1, float64(t.ConsistencyThreshold))
+					if err == nil && len(vecResults) > 0 {
+						matchedVec := vecResults[0]
+						existingNodeID, ok := matchedVec.Metadata["entity_id"].(string)
+						if ok && existingNodeID != node.ID {
+							existingNode, err := graphStore.GetNode(ctx, existingNodeID)
+							if err == nil && existingNode != nil {
+								resolution, err := ext.CompareEntities(ctx, *existingNode, *node)
+								if err == nil && resolution != nil && resolution.Action != schema.ResolutionKeepSeparate {
+									log.Printf("Consistency Reasoning [%s vs %s] -> %s", node.ID, existingNode.ID, resolution.Action)
+									if resolution.Action == schema.ResolutionUpdate {
+										// Merge properties into existing node
+										if existingNode.Properties == nil {
+											existingNode.Properties = make(map[string]interface{})
+										}
+										for k, v := range node.Properties {
+											existingNode.Properties[k] = v
+										}
+										_ = graphStore.UpdateNode(ctx, existingNode)
+										node.ID = existingNode.ID
+										node.Properties = existingNode.Properties
+										node.Type = existingNode.Type
+									} else if resolution.Action == schema.ResolutionIgnore {
+										// Map ID and properties to existing so relationships attach correctly but node isn't overwritten
+										node.ID = existingNode.ID
+										node.Properties = existingNode.Properties
+										node.Type = existingNode.Type
+									} else if resolution.Action == schema.ResolutionContradict {
+										// Create CONTRADICTS edge from new node to old node
+										extraEdges = append(extraEdges, schema.Edge{
+											ID:         fmt.Sprintf("%s-contradicts-%s", node.ID, existingNode.ID),
+											From:       node.ID,
+											To:         existingNode.ID,
+											Type:       schema.EdgeTypeContradicts,
+											Properties: map[string]interface{}{"reason": resolution.Reason},
+											Weight:     1.0,
+										})
+									}
+								}
+							}
+						}
+					}
+					// Store current entity's embedding for future comparisons
+					_ = vectorStore.StoreEmbedding(ctx, "entity-"+node.ID, nodeEmb, map[string]interface{}{
+						"is_entity":   true,
+						"entity_id":   node.ID,
+						"entity_type": string(node.Type),
+						"source_id":   t.DataPoint.ID,
+					})
+				}
+			}
+
+			err = graphStore.StoreNode(ctx, node)
 			if err != nil {
-				log.Printf("failed to store node %s in graphStore: %v", nodes[i].ID, err)
+				log.Printf("failed to store node %s in graphStore: %v", node.ID, err)
 			}
 		}
 	}
@@ -70,6 +141,10 @@ func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb v
 	edges, err := ext.ExtractRelationships(ctx, t.DataPoint.Content, nodes)
 	if err != nil {
 		log.Printf("Warning: relationship extraction returned error: %v", err)
+	}
+
+	if len(extraEdges) > 0 {
+		edges = append(edges, extraEdges...)
 	}
 
 	// 3b. Store Relationships

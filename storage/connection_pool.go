@@ -465,6 +465,7 @@ func (p *GenericConnectionPool) cleanupIdleConnections() {
 	var connectionsToClose []Connection
 
 	// Collect expired connections
+loop:
 	for {
 		select {
 		case conn := <-p.connections:
@@ -481,11 +482,11 @@ func (p *GenericConnectionPool) cleanupIdleConnections() {
 					connectionsToClose = append(connectionsToClose, conn)
 					atomic.AddInt32(&p.stats.IdleConnections, -1)
 				}
-				return // Stop collecting once we find a valid connection
+				break loop // Stop collecting once we find a valid connection
 			}
 		default:
 			// No more idle connections
-			break
+			break loop
 		}
 	}
 

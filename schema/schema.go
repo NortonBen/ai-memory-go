@@ -40,6 +40,8 @@ const (
 	EdgeTypePartOf        EdgeType = "PART_OF"
 	EdgeTypeCreatedBy     EdgeType = "CREATED_BY"
 	EdgeTypeUsedIn        EdgeType = "USED_IN"
+	EdgeTypeContradicts   EdgeType = "CONTRADICTS"
+	EdgeTypeUpdates       EdgeType = "UPDATES"
 )
 
 // Node represents a node in the knowledge graph
@@ -485,25 +487,34 @@ type SearchResults struct {
 	ParsedContext string          `json:"parsed_context,omitempty"`
 }
 
-// ThinkQuery defines parameters for the reasoning and answer generation
+// ThinkQuery parameters for iterative multi-hop agentic retrieval
 type ThinkQuery struct {
-	Text             string `json:"text"`
-	SessionID        string `json:"session_id"`
-	Limit            int    `json:"limit"`             // Limit for vector search
-	HopDepth         int    `json:"hop_depth"`         // Depth of graph traversal (1 or 2)
-	IncludeReasoning bool   `json:"include_reasoning"` // If false, skip reasoning for faster answer
-
-	// Iterative Agentic Features
-	EnableThinking     bool `json:"enable_thinking"`      // Triggers iterative reasoning loop
-	MaxThinkingSteps   int  `json:"max_thinking_steps"`   // Max depth of iterations allowed
-	LearnRelationships bool `json:"learn_relationships"`  // Triggers relationship extraction & persistence upon success
+	Text      string                 `json:"text"`
+	SessionID string                 `json:"session_id,omitempty"`
+	Limit     int                    `json:"limit"`
+	Filters   map[string]interface{} `json:"filters"`
+	
+	// Agentic Routing Options
+	HopDepth           int  // Number of neighbor hops to traverse from anchors
+	EnableThinking     bool // Toggle Agentic RAG / Iterative thinking loop
+	MaxThinkingSteps   int  // Maximum iterations the agent can request 'missing_entities'
+	LearnRelationships bool // Toggle automatic creation of 'BRIDGES_TO' relationships based on logic deduced during think 
+	IncludeReasoning   bool // Returns standard JSON with Thought Process included
 }
 
-// ThinkResult represents the structured output of a MemoryEngine Think operation
+// ThinkResult represents a single analytical step produced by the LLM
 type ThinkResult struct {
-	Reasoning   string         `json:"reasoning"`
-	Answer      string         `json:"answer"`
-	ContextUsed *SearchResults `json:"context_used,omitempty"`
+	Reasoning       string         `json:"reasoning,omitempty"`
+	MissingEntities []string       `json:"missing_entities,omitempty"`
+	Answer          string         `json:"answer,omitempty"`
+	ContextUsed     *SearchResults `json:"context_used,omitempty"`
+}
+
+// AgenticQueryResult is the final synthesized output containing reasoning flow
+type AgenticQueryResult struct {
+	ReasoningPath   []string
+	FinalAnswer     string
+	ContextList     []string
 }
 
 
@@ -775,4 +786,21 @@ func (sr *SearchResult) IsRelevant(threshold float64) bool {
 // GetTraversalDepth returns the depth of graph traversal used to find this result
 func (sr *SearchResult) GetTraversalDepth() int {
 	return len(sr.TraversalPath)
+}
+
+// ResolutionAction defines how a new entity should handle a collision with an existing highly-similar entity.
+type ResolutionAction string
+
+const (
+	ResolutionUpdate       ResolutionAction = "UPDATE"
+	ResolutionContradict   ResolutionAction = "CONTRADICT"
+	ResolutionIgnore       ResolutionAction = "IGNORE"
+	ResolutionKeepSeparate ResolutionAction = "KEEP_SEPARATE"
+)
+
+// ConsistencyResult represents the outcome of an LLM evaluating an entity similarity collision.
+type ConsistencyResult struct {
+	Action     ResolutionAction       `json:"action"`
+	Reason     string                 `json:"reason"`
+	MergedData map[string]interface{} `json:"merged_data,omitempty"`
 }
