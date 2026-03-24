@@ -60,7 +60,6 @@ type ProcessingResult struct {
 
 // WorkerPoolMetrics tracks performance metrics
 type WorkerPoolMetrics struct {
-	mu                    sync.RWMutex
 	TasksSubmitted        int64
 	TasksCompleted        int64
 	TasksFailed           int64
@@ -71,18 +70,14 @@ type WorkerPoolMetrics struct {
 	QueueLength           int
 }
 
-// GetMetrics returns a copy of the current metrics
-func (m *WorkerPoolMetrics) GetMetrics() WorkerPoolMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return *m
-}
+
 
 // WorkerPool manages parallel file processing
 type WorkerPool struct {
 	config  *WorkerPoolConfig
 	parser  Parser
-	metrics *WorkerPoolMetrics
+	metrics   *WorkerPoolMetrics
+	metricsMu sync.RWMutex
 
 	// Channels for task management
 	taskQueue   chan *ProcessingTask
@@ -198,10 +193,10 @@ func (wp *WorkerPool) SubmitTask(filePath string, metadata map[string]interface{
 
 	select {
 	case wp.taskQueue <- task:
-		wp.metrics.mu.Lock()
+		wp.metricsMu.Lock()
 		wp.metrics.TasksSubmitted++
 		wp.metrics.QueueLength++
-		wp.metrics.mu.Unlock()
+		wp.metricsMu.Unlock()
 		return task, nil
 	case <-wp.ctx.Done():
 		return nil, fmt.Errorf("worker pool shutting down")
@@ -277,10 +272,9 @@ func (wp *WorkerPool) ProcessFiles(ctx context.Context, filePaths []string) (map
 }
 
 // GetMetrics returns current worker pool metrics
-// GetMetrics returns current worker pool metrics
 func (wp *WorkerPool) GetMetrics() WorkerPoolMetrics {
-	wp.metrics.mu.Lock()
-	defer wp.metrics.mu.Unlock()
+	wp.metricsMu.Lock()
+	defer wp.metricsMu.Unlock()
 
 	// Update queue length
 	wp.metrics.QueueLength = len(wp.taskQueue)
@@ -344,9 +338,9 @@ func (w *Worker) processTask(task *ProcessingTask) {
 		w.mu.Unlock()
 
 		// Update queue length metric
-		w.pool.metrics.mu.Lock()
+		w.pool.metricsMu.Lock()
 		w.pool.metrics.QueueLength--
-		w.pool.metrics.mu.Unlock()
+		w.pool.metricsMu.Unlock()
 	}()
 
 	startTime := time.Now()
@@ -393,9 +387,9 @@ func (w *Worker) processTask(task *ProcessingTask) {
 				break
 			}
 
-			w.pool.metrics.mu.Lock()
+			w.pool.metricsMu.Lock()
 			w.pool.metrics.TasksRetried++
-			w.pool.metrics.mu.Unlock()
+			w.pool.metricsMu.Unlock()
 		} else {
 			// Final attempt failed
 			result = &ProcessingResult{
@@ -411,7 +405,7 @@ func (w *Worker) processTask(task *ProcessingTask) {
 	}
 
 	// Update metrics
-	w.pool.metrics.mu.Lock()
+	w.pool.metricsMu.Lock()
 	if result.Error == nil {
 		w.pool.metrics.TasksCompleted++
 	} else {
@@ -421,7 +415,7 @@ func (w *Worker) processTask(task *ProcessingTask) {
 	if w.pool.metrics.TasksCompleted > 0 {
 		w.pool.metrics.AverageProcessingTime = w.pool.metrics.TotalProcessingTime / time.Duration(w.pool.metrics.TasksCompleted)
 	}
-	w.pool.metrics.mu.Unlock()
+	w.pool.metricsMu.Unlock()
 
 	// Send result
 	select {

@@ -276,6 +276,9 @@ func (gp *GeminiProvider) GenerateStructuredOutput(ctx context.Context, prompt s
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
 
+	// Gemini rejects "$schema" key
+	delete(schemaMap, "$schema")
+
 	request := GeminiRequest{
 		Contents: []GeminiContent{
 			{
@@ -325,6 +328,9 @@ func (gp *GeminiProvider) GenerateStructuredOutputWithOptions(ctx context.Contex
 	if err := json.Unmarshal([]byte(schemaJSON), &schemaMap); err != nil {
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
+
+	// Gemini rejects "$schema" key
+	delete(schemaMap, "$schema")
 
 	request := GeminiRequest{
 		Contents: []GeminiContent{
@@ -497,7 +503,15 @@ Respond with ONLY the JSON array, no additional text.`, strings.Join(entityList,
 
 // ExtractWithCustomSchema extracts data using a custom JSON schema
 func (gp *GeminiProvider) ExtractWithCustomSchema(ctx context.Context, text string, jsonSchema map[string]interface{}) (interface{}, error) {
-	schemaJSON, err := json.Marshal(jsonSchema)
+	// Gemini rejects "$schema" key
+	cleanSchema := make(map[string]interface{})
+	for k, v := range jsonSchema {
+		if k != "$schema" {
+			cleanSchema[k] = v
+		}
+	}
+
+	schemaJSON, err := json.Marshal(cleanSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JSON schema: %w", err)
 	}
@@ -522,7 +536,7 @@ Respond with ONLY the JSON object matching the schema, no additional text.`, str
 			Temperature:      0.3,
 			MaxOutputTokens:  4096,
 			ResponseMimeType: "application/json",
-			ResponseSchema:   jsonSchema,
+			ResponseSchema:   cleanSchema,
 		},
 		SafetySettings: getDefaultSafetySettings(),
 		SystemInstruction: &GeminiContent{
@@ -994,7 +1008,7 @@ func (gep *GeminiEmbeddingProvider) GenerateEmbedding(ctx context.Context, text 
 	}
 
 	// Set output dimensionality if supported
-	if gep.dimensions > 0 && gep.dimensions != 768 {
+	if gep.dimensions > 0 {
 		request.OutputDimensionality = gep.dimensions
 	}
 

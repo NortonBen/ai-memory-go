@@ -16,103 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// EngineConfig holds configuration for MemoryEngine
-type EngineConfig struct {
-	MaxWorkers int
-}
 
-// AddOptions holds optional parameters for the Add operation
-type AddOptions struct {
-	SessionID            string
-	Metadata             map[string]interface{}
-	WaitUntilComplete    bool
-	ConsistencyThreshold float32
-}
-
-// AddOption configures AddOptions
-type AddOption func(*AddOptions)
-
-// WithMetadata adds custom metadata to the DataPoint
-func WithMetadata(metadata map[string]interface{}) AddOption {
-	return func(o *AddOptions) {
-		if o.Metadata == nil {
-			o.Metadata = make(map[string]interface{})
-		}
-		for k, v := range metadata {
-			o.Metadata[k] = v
-		}
-	}
-}
-
-// WithWaitAdd configures whether Add should wait for background extraction to complete.
-func WithWaitAdd(wait bool) AddOption {
-	return func(o *AddOptions) {
-		o.WaitUntilComplete = wait
-	}
-}
-
-// WithConsistencyThreshold sets the vector distance threshold for invoking consistency reasoning (e.g. 0.1)
-func WithConsistencyThreshold(threshold float32) AddOption {
-	return func(o *AddOptions) {
-		o.ConsistencyThreshold = threshold
-	}
-}
-
-// WithSessionID explicitly maps a session identifier onto the DataPoint
-func WithSessionID(sessionID string) AddOption {
-	return func(o *AddOptions) {
-		o.SessionID = sessionID
-	}
-}
-
-// CognifyOptions holds optional parameters for the Cognify operation
-type CognifyOptions struct {
-	WaitUntilComplete bool
-}
-
-// CognifyOption configures CognifyOptions
-type CognifyOption func(*CognifyOptions)
-
-// WithWaitCognify causes the process to wait for completion before returning.
-func WithWaitCognify(wait bool) CognifyOption {
-	return func(o *CognifyOptions) {
-		o.WaitUntilComplete = wait
-	}
-}
-
-// MemifyOptions holds optional parameters for the Memify operation
-type MemifyOptions struct {
-	WaitUntilComplete bool
-}
-
-// MemifyOption configures MemifyOptions
-type MemifyOption func(*MemifyOptions)
-
-// WithWaitMemify allows Memify to wait for any background completions (though currently synchronous).
-func WithWaitMemify(wait bool) MemifyOption {
-	return func(o *MemifyOptions) {
-		o.WaitUntilComplete = wait
-	}
-}
-
-// MemoryEngine defines the core memory operations
-type MemoryEngine interface {
-	// Core pipeline operations
-	Add(ctx context.Context, content string, opts ...AddOption) (*schema.DataPoint, error)
-	Cognify(ctx context.Context, dataPoint *schema.DataPoint, opts ...CognifyOption) (*schema.DataPoint, error)
-	Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error
-	Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error)
-	Think(ctx context.Context, query *schema.ThinkQuery) (*schema.ThinkResult, error)
-
-	// Session management
-	CreateSession(ctx context.Context, userID string, context map[string]interface{}) (*schema.MemorySession, error)
-	GetSession(ctx context.Context, sessionID string) (*schema.MemorySession, error)
-	CloseSession(ctx context.Context, sessionID string) error
-
-	// Health and lifecycle
-	Health(ctx context.Context) error
-	Close() error
-}
 
 // defaultMemoryEngine is the implementation for orchestrating Add, Cognify, and Search operations.
 type defaultMemoryEngine struct {
@@ -211,20 +115,6 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		return nil, fmt.Errorf("failed to store initial DataPoint: %w", err)
 	}
 
-	task := &AddTask{
-		DataPoint:            dp,
-		ConsistencyThreshold: options.ConsistencyThreshold,
-	}
-
-	if options.WaitUntilComplete {
-		// Wait for execution to finish synchronously
-		err = task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore)
-		return dp, err
-	}
-
-	// Queue for processing
-	e.workerPool.Submit(task)
-
 	return dp, nil
 }
 
@@ -235,13 +125,21 @@ func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.Dat
 		opt(options)
 	}
 
+	threshold := float32(0.0)
+	if th, ok := dataPoint.Metadata["consistency_threshold"].(float64); ok {
+		threshold = float32(th)
+	} else if th, ok := dataPoint.Metadata["consistency_threshold"].(float32); ok {
+		threshold = th
+	}
+
 	task := &CognifyTask{
-		DataPoint: dataPoint,
+		DataPoint:            dataPoint,
+		ConsistencyThreshold: threshold,
 	}
 
 	if options.WaitUntilComplete {
 		// Run synchronously and wait for the extraction & embedding to finish
-		err := task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore)
+		err := task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore, e.workerPool)
 		return dataPoint, err
 	}
 
@@ -257,18 +155,23 @@ func (e *defaultMemoryEngine) Memify(ctx context.Context, dataPoint *schema.Data
 		opt(options)
 	}
 
-	dataPoint.ProcessingStatus = schema.StatusCompleted
-	dataPoint.UpdatedAt = time.Now()
-
-	if e.store != nil {
-		if err := e.store.StoreDataPoint(ctx, dataPoint); err != nil {
-			return fmt.Errorf("failed to persist Memify status: %w", err)
-		}
+	threshold := float32(0.0)
+	if th, ok := dataPoint.Metadata["consistency_threshold"].(float64); ok {
+		threshold = float32(th)
+	} else if th, ok := dataPoint.Metadata["consistency_threshold"].(float32); ok {
+		threshold = th
 	}
 
-	// Currently Memify completes instantly. The WaitUntilComplete flag is preserved
-	// for future background integrations if needed.
+	task := &MemifyTask{
+		DataPoint:            dataPoint,
+		ConsistencyThreshold: threshold,
+	}
 
+	if options.WaitUntilComplete {
+		return task.Execute(ctx, e.workerPool.extractor, e.workerPool.embedder, e.workerPool.store, e.workerPool.graphStore, e.workerPool.vectorStore, e.workerPool)
+	}
+
+	e.workerPool.Submit(task)
 	return nil
 }
 
@@ -525,27 +428,38 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 	return results, nil
 }
 
-// CreateSession creates a new memory session.
-func (e *defaultMemoryEngine) CreateSession(ctx context.Context, userID string, contextData map[string]interface{}) (*schema.MemorySession, error) {
-	session := &schema.MemorySession{
-		ID:         uuid.New().String(),
-		UserID:     userID,
-		Context:    contextData,
-		CreatedAt:  time.Now(),
-		LastAccess: time.Now(),
-		IsActive:   true,
+// DeleteMemory deletes a memory by its specific ID.
+// If id is empty but sessionID is provided, it deletes all memories in that session.
+func (e *defaultMemoryEngine) DeleteMemory(ctx context.Context, id string, sessionID string) error {
+	if id != "" {
+		if sessionID != "" {
+			// Ensure it belongs to the session
+			dp, err := e.store.GetDataPoint(ctx, id)
+			if err != nil {
+				return err
+			}
+			if dp.SessionID != sessionID {
+				return fmt.Errorf("datapoint %s does not belong to session %s", id, sessionID)
+			}
+		}
+		
+		if e.graphStore != nil {
+			nodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", id)
+			if err == nil {
+				for _, n := range nodes {
+					_ = e.graphStore.DeleteNode(ctx, n.ID)
+				}
+			}
+		}
+		
+		return e.store.DeleteDataPoint(ctx, id)
 	}
-	return session, nil
-}
 
-// GetSession retrieves an active memory session.
-func (e *defaultMemoryEngine) GetSession(ctx context.Context, sessionID string) (*schema.MemorySession, error) {
-	return nil, fmt.Errorf("not implemented")
-}
+	if sessionID != "" {
+		return e.store.DeleteDataPointsBySession(ctx, sessionID)
+	}
 
-// CloseSession ends a memory session.
-func (e *defaultMemoryEngine) CloseSession(ctx context.Context, sessionID string) error {
-	return nil
+	return fmt.Errorf("must provide either id or sessionID")
 }
 
 // Health checks the status of the memory engine.

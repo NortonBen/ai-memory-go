@@ -91,6 +91,8 @@ func (f *DefaultProviderFactory) CreateProvider(config *ProviderConfig) (LLMProv
 		return f.createLocalProvider(config)
 	case ProviderLMStudio:
 		return f.createLMStudioProvider(config)
+	case ProviderOpenRouter:
+		return f.createOpenRouterProvider(config)
 	default:
 		return nil, NewExtractorError("unsupported", fmt.Sprintf("unsupported provider type: %s", config.Type), 400)
 	}
@@ -279,6 +281,25 @@ func (f *DefaultProviderFactory) createLMStudioProvider(config *ProviderConfig) 
 	}
 	return provider, nil
 }
+
+func (f *DefaultProviderFactory) createOpenRouterProvider(config *ProviderConfig) (LLMProvider, error) {
+	siteURL := ""
+	appName := ""
+	if config.CustomOptions != nil {
+		if s, ok := config.CustomOptions["site_url"].(string); ok {
+			siteURL = s
+		}
+		if a, ok := config.CustomOptions["app_name"].(string); ok {
+			appName = a
+		}
+	}
+	provider, err := NewOpenRouterProvider(config.APIKey, config.Model, siteURL, appName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OpenRouter provider: %w", err)
+	}
+	return provider, nil
+}
+
 
 // DefaultEmbeddingProviderFactory implements the EmbeddingProviderFactory interface
 type DefaultEmbeddingProviderFactory struct {

@@ -73,8 +73,8 @@ func (ae *AutoEmbedder) GenerateEmbedding(ctx context.Context, text string) ([]f
 	}
 	
 	// Try primary provider
-	embedding, err := ae.tryProvider(ctx, ae.primary, text)
-	if err == nil {
+	embedding, primaryErr := ae.tryProvider(ctx, ae.primary, text)
+	if primaryErr == nil {
 		// Cache the result
 		if ae.cache != nil {
 			cacheKey := ae.generateCacheKey(text)
@@ -83,6 +83,7 @@ func (ae *AutoEmbedder) GenerateEmbedding(ctx context.Context, text string) ([]f
 		return embedding, nil
 	}
 	
+	lastErr := primaryErr
 	// Try fallback providers
 	for _, fallback := range ae.fallbacks {
 		embedding, err := ae.tryProvider(ctx, fallback, text)
@@ -94,9 +95,10 @@ func (ae *AutoEmbedder) GenerateEmbedding(ctx context.Context, text string) ([]f
 			}
 			return embedding, nil
 		}
+		lastErr = err
 	}
 	
-	return nil, fmt.Errorf("all embedding providers failed")
+	return nil, fmt.Errorf("all embedding providers failed. last error: %v", lastErr)
 }
 
 // GenerateBatchEmbeddings generates embeddings for multiple texts

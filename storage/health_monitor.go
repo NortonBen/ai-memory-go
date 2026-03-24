@@ -153,6 +153,10 @@ func (hm *HealthMonitor) Start() error {
 		return nil
 	}
 
+	hm.mu.Lock()
+	hm.stopChan = make(chan struct{})
+	hm.mu.Unlock()
+
 	hm.wg.Add(1)
 	go hm.monitorLoop()
 

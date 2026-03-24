@@ -98,7 +98,9 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 			created_at DATETIME,
 			updated_at DATETIME,
 			processing_status TEXT,
-			error_message TEXT
+			error_message TEXT,
+			nodes TEXT,
+			edges TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_session_id ON datapoints(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_user_id ON datapoints(user_id)`,
@@ -130,6 +132,10 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 		}
 	}
 
+	// Backwards compatibility for existing databases
+	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN nodes TEXT")
+	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN edges TEXT")
+
 	return nil
 }
 
@@ -139,11 +145,14 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
+	
+	nodesBytes, _ := json.Marshal(dp.Nodes)
+	edgesBytes, _ := json.Marshal(dp.Edges)
 
 	query := `
 		INSERT INTO datapoints (id, content, content_type, metadata, session_id, user_id, 
-			created_at, updated_at, processing_status, error_message)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, updated_at, processing_status, error_message, nodes, edges)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			content = excluded.content,
 			content_type = excluded.content_type,
@@ -152,12 +161,14 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 			user_id = excluded.user_id,
 			updated_at = excluded.updated_at,
 			processing_status = excluded.processing_status,
-			error_message = excluded.error_message
+			error_message = excluded.error_message,
+			nodes = excluded.nodes,
+			edges = excluded.edges
 	`
 
 	_, err = sa.db.ExecContext(ctx, query,
 		dp.ID, dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
-		dp.CreatedAt, dp.UpdatedAt, dp.ProcessingStatus, dp.ErrorMessage)
+		dp.CreatedAt, dp.UpdatedAt, dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes))
 
 	return err
 }
@@ -166,17 +177,17 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 func (sa *SQLiteAdapter) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) {
 	query := `
 		SELECT id, content, content_type, metadata, session_id, user_id,
-			created_at, updated_at, processing_status, error_message
+			created_at, updated_at, processing_status, error_message, nodes, edges
 		FROM datapoints WHERE id = ?
 	`
 	row := sa.db.QueryRowContext(ctx, query, id)
 
 	var dp schema.DataPoint
-	var metadataStr string
+	var metadataStr, nodesStr, edgesStr sql.NullString
 
 	err := row.Scan(
 		&dp.ID, &dp.Content, &dp.ContentType, &metadataStr, &dp.SessionID, &dp.UserID,
-		&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage)
+		&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("datapoint not found: %s", id)
@@ -185,12 +196,19 @@ func (sa *SQLiteAdapter) GetDataPoint(ctx context.Context, id string) (*schema.D
 		return nil, err
 	}
 
-	if metadataStr != "" {
-		if err := json.Unmarshal([]byte(metadataStr), &dp.Metadata); err != nil {
+	if metadataStr.Valid && metadataStr.String != "" {
+		if err := json.Unmarshal([]byte(metadataStr.String), &dp.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
 	} else {
 		dp.Metadata = make(map[string]interface{})
+	}
+
+	if nodesStr.Valid && nodesStr.String != "" {
+		_ = json.Unmarshal([]byte(nodesStr.String), &dp.Nodes)
+	}
+	if edgesStr.Valid && edgesStr.String != "" {
+		_ = json.Unmarshal([]byte(edgesStr.String), &dp.Edges)
 	}
 
 	return &dp, nil
@@ -202,16 +220,19 @@ func (sa *SQLiteAdapter) UpdateDataPoint(ctx context.Context, dp *schema.DataPoi
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
+	
+	nodesBytes, _ := json.Marshal(dp.Nodes)
+	edgesBytes, _ := json.Marshal(dp.Edges)
 
 	query := `
 		UPDATE datapoints SET
 			content = ?, content_type = ?, metadata = ?, session_id = ?, user_id = ?,
-			updated_at = ?, processing_status = ?, error_message = ?
+			updated_at = ?, processing_status = ?, error_message = ?, nodes = ?, edges = ?
 		WHERE id = ?
 	`
 	result, err := sa.db.ExecContext(ctx, query,
 		dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
-		time.Now(), dp.ProcessingStatus, dp.ErrorMessage, dp.ID)
+		time.Now(), dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes), dp.ID)
 
 	if err != nil {
 		return err
@@ -247,6 +268,13 @@ func (sa *SQLiteAdapter) DeleteDataPoint(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteDataPointsBySession implements RelationalStore
+func (sa *SQLiteAdapter) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
+	query := `DELETE FROM datapoints WHERE session_id = ?`
+	_, err := sa.db.ExecContext(ctx, query, sessionID)
+	return err
+}
+
 // QueryDataPoints implements RelationalStore
 func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery) ([]*schema.DataPoint, error) {
 	if q == nil {
@@ -255,7 +283,7 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery)
 
 	queryStr := `
 		SELECT id, content, content_type, metadata, session_id, user_id,
-			created_at, updated_at, processing_status, error_message
+			created_at, updated_at, processing_status, error_message, nodes, edges
 		FROM datapoints WHERE 1=1
 	`
 	args := []interface{}{}
@@ -279,7 +307,7 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery)
 		} else if sa.config.EnableFullText && (q.SearchMode == "fulltext" || q.SearchMode == "") {
 			queryStr = `
 			SELECT d.id, d.content, d.content_type, d.metadata, d.session_id, d.user_id,
-				d.created_at, d.updated_at, d.processing_status, d.error_message
+				d.created_at, d.updated_at, d.processing_status, d.error_message, d.nodes, d.edges
 			FROM datapoints d
 			JOIN datapoints_fts fts ON d.rowid = fts.rowid
 			WHERE fts.content MATCH ?
@@ -355,19 +383,25 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery)
 	var results []*schema.DataPoint
 	for rows.Next() {
 		dp := &schema.DataPoint{}
-		var metadataStr string
+		var metadataStr, nodesStr, edgesStr sql.NullString
 		err := rows.Scan(
 			&dp.ID, &dp.Content, &dp.ContentType, &metadataStr, &dp.SessionID, &dp.UserID,
-			&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage)
+			&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr)
 		if err != nil {
 			return nil, err
 		}
-		if metadataStr != "" {
-			if err := json.Unmarshal([]byte(metadataStr), &dp.Metadata); err != nil {
+		if metadataStr.Valid && metadataStr.String != "" {
+			if err := json.Unmarshal([]byte(metadataStr.String), &dp.Metadata); err != nil {
 				return nil, err
 			}
 		} else {
 			dp.Metadata = make(map[string]interface{})
+		}
+		if nodesStr.Valid && nodesStr.String != "" {
+			_ = json.Unmarshal([]byte(nodesStr.String), &dp.Nodes)
+		}
+		if edgesStr.Valid && edgesStr.String != "" {
+			_ = json.Unmarshal([]byte(edgesStr.String), &dp.Edges)
 		}
 		results = append(results, dp)
 	}
@@ -561,9 +595,11 @@ func (sa *SQLiteAdapter) StoreBatch(ctx context.Context, dataPoints []*schema.Da
 		if err != nil {
 			return fmt.Errorf("failed to marshal metadata for dp %s: %w", dp.ID, err)
 		}
+		nodesBytes, _ := json.Marshal(dp.Nodes)
+		edgesBytes, _ := json.Marshal(dp.Edges)
 		_, err = stmt.ExecContext(ctx,
 			dp.ID, dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
-			dp.CreatedAt, dp.UpdatedAt, dp.ProcessingStatus, dp.ErrorMessage)
+			dp.CreatedAt, dp.UpdatedAt, dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes))
 		if err != nil {
 			return err
 		}

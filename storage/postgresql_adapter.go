@@ -233,6 +233,13 @@ func (pa *PostgresAdapter) DeleteDataPoint(ctx context.Context, id string) error
 	return nil
 }
 
+// DeleteDataPointsBySession implements RelationalStore
+func (pa *PostgresAdapter) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
+	query := `DELETE FROM datapoints WHERE session_id = $1`
+	_, err := pa.db.ExecContext(ctx, query, sessionID)
+	return err
+}
+
 // QueryDataPoints implements RelationalStore
 func (pa *PostgresAdapter) QueryDataPoints(ctx context.Context, q *DataPointQuery) ([]*schema.DataPoint, error) {
 	if q == nil {

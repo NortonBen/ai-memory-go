@@ -615,6 +615,10 @@ func (m *mockStorage) DeleteDataPoint(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
 func (m *mockStorage) QueryDataPoints(ctx context.Context, query *DataPointQuery) ([]*schema.DataPoint, error) {
 	return nil, nil
 }

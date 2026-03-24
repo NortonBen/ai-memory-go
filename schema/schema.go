@@ -89,6 +89,10 @@ type DataPoint struct {
 	// Graph relationships
 	Relationships []Relationship `json:"relationships,omitempty"`
 
+	// Extracted graph components for Memify phase
+	Nodes []*Node `json:"nodes,omitempty"`
+	Edges []Edge  `json:"edges,omitempty"`
+
 	// Processing status
 	ProcessingStatus ProcessingStatus `json:"processing_status"`
 	ErrorMessage     string           `json:"error_message,omitempty"`
@@ -108,6 +112,7 @@ type ProcessingStatus string
 const (
 	StatusPending    ProcessingStatus = "pending"
 	StatusProcessing ProcessingStatus = "processing"
+	StatusCognified  ProcessingStatus = "cognified"
 	StatusCompleted  ProcessingStatus = "completed"
 	StatusFailed     ProcessingStatus = "failed"
 	StatusRetrying   ProcessingStatus = "retrying"
@@ -270,6 +275,23 @@ func (dp *DataPoint) Clone() *DataPoint {
 	if dp.Relationships != nil {
 		clone.Relationships = make([]Relationship, len(dp.Relationships))
 		copy(clone.Relationships, dp.Relationships)
+	}
+
+	// Deep copy graph drafts
+	if dp.Nodes != nil {
+		clone.Nodes = make([]*Node, len(dp.Nodes))
+		for i, n := range dp.Nodes {
+			if n != nil {
+				clone.Nodes[i] = n.Clone()
+			}
+		}
+	}
+
+	if dp.Edges != nil {
+		clone.Edges = make([]Edge, len(dp.Edges))
+		for i, e := range dp.Edges {
+			clone.Edges[i] = *e.Clone()
+		}
 	}
 
 	return clone

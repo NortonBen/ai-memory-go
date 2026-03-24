@@ -20,6 +20,7 @@ type Storage interface {
 	GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error)
 	UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error
 	DeleteDataPoint(ctx context.Context, id string) error
+	DeleteDataPointsBySession(ctx context.Context, sessionID string) error
 	QueryDataPoints(ctx context.Context, query *DataPointQuery) ([]*schema.DataPoint, error)
 
 	// Session operations
@@ -45,6 +46,7 @@ type RelationalStore interface {
 	GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error)
 	UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error
 	DeleteDataPoint(ctx context.Context, id string) error
+	DeleteDataPointsBySession(ctx context.Context, sessionID string) error
 
 	// Query operations
 	QueryDataPoints(ctx context.Context, query *DataPointQuery) ([]*schema.DataPoint, error)

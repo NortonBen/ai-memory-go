@@ -2,202 +2,23 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/NortonBen/ai-memory-go/extractor"
 	"github.com/NortonBen/ai-memory-go/graph"
-	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
-	"github.com/NortonBen/ai-memory-go/vector")
+	"github.com/NortonBen/ai-memory-go/vector"
+)
 
 // WorkerTask defines a task that can be executed by the worker pool.
 type WorkerTask interface {
-	Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error
-}
-
-// AddTask is responsible for processing a new memory DataPoint.
-// It extracts entities, generates embeddings, and saves relationships.
-type AddTask struct {
-	DataPoint            *schema.DataPoint
-	ConsistencyThreshold float32
-}
-
-// Execute performs the extraction and embedding logic for AddTask.
-func (t *AddTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error {
-	t.DataPoint.ProcessingStatus = schema.StatusProcessing
-	if err := store.UpdateDataPoint(ctx, t.DataPoint); err != nil {
-		log.Printf("Failed to update status to processing: %v", err)
-	}
-
-	// 1. Generate Embedding
-	embedding, err := emb.GenerateEmbedding(ctx, t.DataPoint.Content)
-	if err != nil {
-		return t.fail(ctx, store, fmt.Errorf("embedding generation failed: %w", err))
-	}
-	t.DataPoint.Embedding = embedding
-
-	// 1b. Store Embedding into VectorStore if provided
-	if vectorStore != nil {
-		err = vectorStore.StoreEmbedding(ctx, t.DataPoint.ID, embedding, map[string]interface{}{
-			"content_type": t.DataPoint.ContentType,
-			"session_id":   t.DataPoint.SessionID,
-			"user_id":      t.DataPoint.UserID,
-		})
-		if err != nil {
-			log.Printf("failed to store embedding in vectorStore: %v", err)
-		}
-	}
-
-	// 2. Extract Entities
-	nodes, err := ext.ExtractEntities(ctx, t.DataPoint.Content)
-	if err != nil {
-		return t.fail(ctx, store, fmt.Errorf("entity extraction failed: %w", err))
-	}
-
-	var extraEdges []schema.Edge
-
-	// 2b. Store Graph Nodes into GraphStore if provided
-	if graphStore != nil {
-		for i := range nodes {
-			node := &nodes[i]
-
-			// Assign source_id so graph traversal knows which DataPoint created this node
-			if node.Properties == nil {
-				node.Properties = make(map[string]interface{})
-			}
-			node.Properties["source_id"] = t.DataPoint.ID
-
-			// --- Consistency Reasoning ---
-			if t.ConsistencyThreshold > 0 && vectorStore != nil {
-				// Embed node context for similarity comparison
-				nodeContent := fmt.Sprintf("Entity: %s\nType: %s\nProperties: %v", node.ID, node.Type, node.Properties)
-				nodeEmb, err := emb.GenerateEmbedding(ctx, nodeContent)
-				if err == nil {
-					// Search for similar entities
-					filters := map[string]interface{}{"is_entity": true}
-					vecResults, err := vectorStore.SimilaritySearchWithFilter(ctx, nodeEmb, filters, 1, float64(t.ConsistencyThreshold))
-					if err == nil && len(vecResults) > 0 {
-						matchedVec := vecResults[0]
-						existingNodeID, ok := matchedVec.Metadata["entity_id"].(string)
-						if ok && existingNodeID != node.ID {
-							existingNode, err := graphStore.GetNode(ctx, existingNodeID)
-							if err == nil && existingNode != nil {
-								resolution, err := ext.CompareEntities(ctx, *existingNode, *node)
-								if err == nil && resolution != nil && resolution.Action != schema.ResolutionKeepSeparate {
-									log.Printf("Consistency Reasoning [%s vs %s] -> %s", node.ID, existingNode.ID, resolution.Action)
-									if resolution.Action == schema.ResolutionUpdate {
-										// Merge properties into existing node
-										if existingNode.Properties == nil {
-											existingNode.Properties = make(map[string]interface{})
-										}
-										for k, v := range node.Properties {
-											existingNode.Properties[k] = v
-										}
-										_ = graphStore.UpdateNode(ctx, existingNode)
-										node.ID = existingNode.ID
-										node.Properties = existingNode.Properties
-										node.Type = existingNode.Type
-									} else if resolution.Action == schema.ResolutionIgnore {
-										// Map ID and properties to existing so relationships attach correctly but node isn't overwritten
-										node.ID = existingNode.ID
-										node.Properties = existingNode.Properties
-										node.Type = existingNode.Type
-									} else if resolution.Action == schema.ResolutionContradict {
-										// Create CONTRADICTS edge from new node to old node
-										extraEdges = append(extraEdges, schema.Edge{
-											ID:         fmt.Sprintf("%s-contradicts-%s", node.ID, existingNode.ID),
-											From:       node.ID,
-											To:         existingNode.ID,
-											Type:       schema.EdgeTypeContradicts,
-											Properties: map[string]interface{}{"reason": resolution.Reason},
-											Weight:     1.0,
-										})
-									}
-								}
-							}
-						}
-					}
-					// Store current entity's embedding for future comparisons
-					_ = vectorStore.StoreEmbedding(ctx, "entity-"+node.ID, nodeEmb, map[string]interface{}{
-						"is_entity":   true,
-						"entity_id":   node.ID,
-						"entity_type": string(node.Type),
-						"source_id":   t.DataPoint.ID,
-					})
-				}
-			}
-
-			err = graphStore.StoreNode(ctx, node)
-			if err != nil {
-				log.Printf("failed to store node %s in graphStore: %v", node.ID, err)
-			}
-		}
-	}
-
-	// 3. Extract Relationships
-	edges, err := ext.ExtractRelationships(ctx, t.DataPoint.Content, nodes)
-	if err != nil {
-		log.Printf("Warning: relationship extraction returned error: %v", err)
-	}
-
-	if len(extraEdges) > 0 {
-		edges = append(edges, extraEdges...)
-	}
-
-	// 3b. Store Relationships
-	if graphStore != nil && len(edges) > 0 {
-		for i := range edges {
-			err = graphStore.CreateRelationship(ctx, &edges[i])
-			if err != nil {
-				log.Printf("failed to store edge in graphStore: %v", err)
-			}
-		}
-	}
-
-	// 4. Map edges to Relationships in DataPoint
-	var relationships []schema.Relationship
-	for _, edge := range edges {
-		relationships = append(relationships, edge.ToRelationship())
-	}
-	t.DataPoint.Relationships = relationships
-
-	// 5. Update Status
-	t.DataPoint.ProcessingStatus = schema.StatusCompleted
-	t.DataPoint.UpdatedAt = time.Now()
-
-	// 6. Save updated DataPoint
-	if err := store.UpdateDataPoint(ctx, t.DataPoint); err != nil {
-		return fmt.Errorf("failed to update DataPoint: %w", err)
-	}
-
-	return nil
-}
-
-func (t *AddTask) fail(ctx context.Context, store storage.Storage, err error) error {
-	t.DataPoint.ProcessingStatus = schema.StatusFailed
-	t.DataPoint.ErrorMessage = err.Error()
-	t.DataPoint.UpdatedAt = time.Now()
-	_ = store.UpdateDataPoint(ctx, t.DataPoint)
-	return err
-}
-
-// CognifyTask re-processes a DataPoint to deepen extraction.
-type CognifyTask struct {
-	DataPoint *schema.DataPoint
-}
-
-// Execute performs re-extraction and updating for CognifyTask.
-func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore) error {
-	addT := &AddTask{DataPoint: t.DataPoint}
-	return addT.Execute(ctx, ext, emb, store, graphStore, vectorStore)
+	Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore, wp *WorkerPool) error
 }
 
 // WorkerPool manages a pool of workers to process MemoryEngine tasks concurrently.
 type WorkerPool struct {
-	maxWorkers int
+	maxWorkers  int
 	taskQueue   chan WorkerTask
 	extractor   extractor.LLMExtractor
 	embedder    vector.EmbeddingProvider
@@ -237,7 +58,7 @@ func (wp *WorkerPool) worker() {
 	for {
 		select {
 		case task := <-wp.taskQueue:
-			if err := task.Execute(ctx, wp.extractor, wp.embedder, wp.store, wp.graphStore, wp.vectorStore); err != nil {
+			if err := task.Execute(ctx, wp.extractor, wp.embedder, wp.store, wp.graphStore, wp.vectorStore, wp); err != nil {
 				log.Printf("Task execution error: %v", err)
 			}
 		case <-wp.quit:

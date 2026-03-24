@@ -286,6 +286,7 @@ const (
 	ProviderHuggingFace ProviderType = "huggingface"
 	ProviderLocal       ProviderType = "local"
 	ProviderLMStudio    ProviderType = "lmstudio"
+	ProviderOpenRouter  ProviderType = "openrouter"
 	ProviderCustom      ProviderType = "custom"
 )
 
