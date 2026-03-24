@@ -16,6 +16,9 @@ help:
 	@echo "  make install-tools - Install development tools"
 	@echo "  make ci            - Run all CI checks locally"
 
+build-cli:
+	go build -o ai-memory-cli cmd/ai-memory-cli/main.go
+
 # Run tests
 test:
 	@echo "Running tests..."

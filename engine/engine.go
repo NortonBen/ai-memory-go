@@ -148,6 +148,29 @@ func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.Dat
 	return dataPoint, nil
 }
 
+// CognifyPending sweeps the relational store for items that have ProcessingStatus == StatusPending and processes them synchronously.
+func (e *defaultMemoryEngine) CognifyPending(ctx context.Context, sessionID string) error {
+	q := &storage.DataPointQuery{
+		SessionID: sessionID,
+		Limit:     1000,
+	}
+	dps, err := e.store.QueryDataPoints(ctx, q)
+	if err != nil {
+		return fmt.Errorf("failed to query data points: %w", err)
+	}
+
+	for _, dp := range dps {
+		if dp.ProcessingStatus == schema.StatusPending {
+			fmt.Printf("Cognifying pending data point: %s (Content: %.30s...)\n", dp.ID, dp.Content)
+			_, err := e.Cognify(ctx, dp, WithWaitCognify(true))
+			if err != nil {
+				fmt.Printf("Failed to cognify data point %s: %v\n", dp.ID, err)
+			}
+		}
+	}
+	return nil
+}
+
 // Memify finalizes the memory integration (e.g. promoting concepts).
 func (e *defaultMemoryEngine) Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error {
 	options := &MemifyOptions{}

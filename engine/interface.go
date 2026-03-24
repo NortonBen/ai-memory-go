@@ -90,6 +90,7 @@ type MemoryEngine interface {
 	// Core pipeline operations
 	Add(ctx context.Context, content string, opts ...AddOption) (*schema.DataPoint, error)
 	Cognify(ctx context.Context, dataPoint *schema.DataPoint, opts ...CognifyOption) (*schema.DataPoint, error)
+	CognifyPending(ctx context.Context, sessionID string) error
 	Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error
 	Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error)
 	Think(ctx context.Context, query *schema.ThinkQuery) (*schema.ThinkResult, error)
