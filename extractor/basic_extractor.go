@@ -337,3 +337,52 @@ Return a JSON object with a "relationships" array. Each relationship should have
 - type: relationship type (RELATED_TO, SIMILAR_TO, PART_OF, etc.)
 - weight: relationship strength (0.0 to 1.0, optional)`, strings.Join(entityNames, ", "), text)
 }
+
+// ExtractBridgingRelationship creates a direct relationship summarizing an LLM's multi-hop reasoning sequence
+func (be *BasicExtractor) ExtractBridgingRelationship(ctx context.Context, question string, answer string) (*schema.Edge, error) {
+	prompt := fmt.Sprintf(`Given the following question and answer, extract the core underlying relationship that directly answers the question.
+If the answer relies on multi-hop reasoning, summarize it into a single direct relationship between the most important entities.
+
+Question: %s
+Answer: %s
+
+Return a JSON object with a "relationship" object. It should have:
+- from: source entity name (e.g., a person, company, etc.)
+- to: target entity name
+- type: relationship type (e.g., HAS_CEO_BEST_FRIEND, RELATED_TO)
+- weight: 1.0 (or a float between 0.0 and 1.0)`, question, answer)
+
+	type ExtractionResult struct {
+		Relationship struct {
+			From   string  `json:"from"`
+			To     string  `json:"to"`
+			Type   string  `json:"type"`
+			Weight float64 `json:"weight,omitempty"`
+		} `json:"relationship"`
+	}
+
+	var result ExtractionResult
+	_, err := be.provider.GenerateStructuredOutput(ctx, prompt, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract bridging relationship: %w", err)
+	}
+
+	rel := result.Relationship
+	if rel.From == "" || rel.To == "" || rel.Type == "" {
+		return nil, fmt.Errorf("invalid bridging relationship extracted: missing fields")
+	}
+
+	weight := rel.Weight
+	if weight == 0 {
+		weight = 1.0
+	}
+
+	edge := schema.NewEdge(rel.From, rel.To, schema.EdgeType(rel.Type), weight)
+	edge.Properties = map[string]interface{}{
+		"is_bridging": true,
+		"question":    question,
+		"answer":      answer,
+	}
+
+	return edge, nil
+}

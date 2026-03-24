@@ -529,16 +529,13 @@ func (e *defaultMemoryEngine) Close() error {
 
 // Think performs a Hybrid Search and explicitly traverses the knowledge graph to generate a reasoned answer.
 func (e *defaultMemoryEngine) Think(ctx context.Context, query *schema.ThinkQuery) (*schema.ThinkResult, error) {
-	if e.extractor == nil {
+	if e.extractor == nil || e.extractor.GetProvider() == nil {
 		return nil, fmt.Errorf("extractor (LLM) is required for Think")
 	}
 
 	provider := e.extractor.GetProvider()
-	if provider == nil {
-		return nil, fmt.Errorf("LLM provider is required for Think")
-	}
 
-	// 1. Perform retrieval sequence via retrieveContext helper
+	// 1. Initial retrieval sequence
 	searchQuery := &schema.SearchQuery{
 		Text:      query.Text,
 		SessionID: query.SessionID,
@@ -550,7 +547,15 @@ func (e *defaultMemoryEngine) Think(ctx context.Context, query *schema.ThinkQuer
 		return nil, fmt.Errorf("hybrid search failed: %w", err)
 	}
 
-	// 2. Construct Prompt using the comprehensive ParsedContext from Search()
+	// 2. Dispatch to single-shot or iterative logic
+	if !query.EnableThinking {
+		return e.singleShotThink(ctx, provider, query, results)
+	}
+
+	return e.iterativeThink(ctx, provider, query, results)
+}
+
+func (e *defaultMemoryEngine) singleShotThink(ctx context.Context, provider extractor.LLMProvider, query *schema.ThinkQuery, results *schema.SearchResults) (*schema.ThinkResult, error) {
 	var jsonFormatRequirement string
 	if query.IncludeReasoning {
 		jsonFormatRequirement = `{
@@ -576,13 +581,11 @@ Context:
 Question: %s
 JSON Response:`, jsonFormatRequirement, results.ParsedContext, query.Text)
 
-	// 3. Generate Answer
 	responseStr, err := provider.GenerateCompletion(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("llm completion failed: %w", err)
 	}
 
-	// 4. Parse Response
 	responseStr = strings.TrimPrefix(responseStr, "```json")
 	responseStr = strings.TrimPrefix(responseStr, "```")
 	responseStr = strings.TrimSuffix(responseStr, "```")
@@ -591,17 +594,154 @@ JSON Response:`, jsonFormatRequirement, results.ParsedContext, query.Text)
 	var result schema.ThinkResult
 	err = json.Unmarshal([]byte(responseStr), &result)
 	if err != nil {
-		// Fallback if parsing fails
-		result = schema.ThinkResult{
-			Answer: responseStr,
-		}
+		result = schema.ThinkResult{Answer: responseStr}
 		if query.IncludeReasoning {
 			result.Reasoning = "Failed to parse JSON reasoning."
 		}
 	}
-	
 	result.ContextUsed = results
 
 	return &result, nil
+}
+
+func (e *defaultMemoryEngine) iterativeThink(ctx context.Context, provider extractor.LLMProvider, query *schema.ThinkQuery, initialResults *schema.SearchResults) (*schema.ThinkResult, error) {
+	maxSteps := query.MaxThinkingSteps
+	if maxSteps <= 0 {
+		maxSteps = 3
+	}
+
+	currentContext := initialResults.ParsedContext
+	var lastResult schema.ThinkResult
+
+	var jsonFormatRequirement string
+	if query.IncludeReasoning {
+		jsonFormatRequirement = `{
+  "reasoning": "your step by step thought process based on the context",
+  "missing_entities": ["entity1", "entity2"],
+  "answer": "your final brief answer to the user (leave empty string if you need more information)"
+}`
+	} else {
+		jsonFormatRequirement = `{
+  "missing_entities": ["entity1", "entity2"],
+  "answer": "your final brief answer to the user (leave empty string if you need more information)"
+}`
+	}
+
+	for step := 1; step <= maxSteps; step++ {
+		prompt := fmt.Sprintf(`You are an AI assistant powered by a Memory Engine.
+Use the following retrieved context to answer the user's question accurately.
+If the answer is missing from the context, identify the exact entities (names of people, organizations, concepts) that you need more information about to answer the question, and place them in 'missing_entities'.
+
+You MUST ALWAYS respond in clean JSON format matching the schema below. 
+You MUST ALWAYS include the 'reasoning' field to explain your thought process.
+Note: IF you provide an answer, 'missing_entities' MUST be empty. IF you provide missing_entities, 'answer' MUST be empty.
+
+%s
+
+Example valid response:
+{
+  "reasoning": "I have found that X is Y, but I still need to know Z to answer.",
+  "missing_entities": ["Z"],
+  "answer": ""
+}
+
+Context:
+%s
+
+Question: %s
+JSON Response:`, jsonFormatRequirement, currentContext, query.Text)
+
+		responseStr, err := provider.GenerateCompletion(ctx, prompt)
+		if err != nil {
+			return nil, fmt.Errorf("llm completion failed at step %d: %w", step, err)
+		}
+
+		responseStr = strings.TrimPrefix(responseStr, "```json")
+		responseStr = strings.TrimPrefix(responseStr, "```")
+		responseStr = strings.TrimSuffix(responseStr, "```")
+		responseStr = strings.TrimSpace(responseStr)
+
+		var result struct {
+			Reasoning       string   `json:"reasoning"`
+			MissingEntities []string `json:"missing_entities"`
+			Answer          string   `json:"answer"`
+		}
+
+		err = json.Unmarshal([]byte(responseStr), &result)
+		if err != nil {
+			lastResult = schema.ThinkResult{Reasoning: "Failed to parse JSON: " + err.Error(), Answer: responseStr}
+			break
+		}
+
+		if len(result.MissingEntities) == 0 && result.Answer != "" {
+			// Found the answer!
+			lastResult = schema.ThinkResult{
+				Reasoning: result.Reasoning,
+				Answer:    result.Answer,
+			}
+
+			// Learn Relationships
+			if query.LearnRelationships && e.graphStore != nil {
+				edge, err := e.extractor.ExtractBridgingRelationship(ctx, query.Text, result.Answer)
+				if err == nil && edge != nil {
+					// We might need to resolve IDs here if possible, but for demonstration:
+					// Just storing Name -> Name with 'is_bridging' to help subsequent semantic graph queries.
+					_ = e.graphStore.CreateRelationship(ctx, edge)
+				}
+			}
+			break
+		}
+
+		// Keep thinking! We have missing entities.
+		if step < maxSteps && e.graphStore != nil {
+			var additionalContext strings.Builder
+			additionalContext.WriteString(fmt.Sprintf("\n--- ADDITIONAL CONTEXT FROM HOP %d ---\n", step))
+
+			for _, entityName := range result.MissingEntities {
+				// 1. Graph search for exact/partial entities
+				nodes, _ := e.graphStore.FindNodesByEntity(ctx, entityName, "")
+				for _, n := range nodes {
+					// Format Node
+					props, _ := json.Marshal(n.Properties)
+					additionalContext.WriteString(fmt.Sprintf("- Node: %s (Type: %s, Props: %s)\n", n.ID, n.Type, string(props)))
+					
+					// Find Connected Nodes iteratively
+					connectedNodes, _ := e.graphStore.FindConnected(ctx, n.ID, nil)
+					for _, cn := range connectedNodes {
+						cnProps, _ := json.Marshal(cn.Properties)
+						additionalContext.WriteString(fmt.Sprintf("  -> Connected: %s (Type: %s, Props: %s)\n", cn.ID, cn.Type, string(cnProps)))
+					}
+				}
+
+				// 2. Vector search for the missing entity concept
+				if e.embedder != nil && e.vectorStore != nil {
+					emb, err := e.embedder.GenerateEmbedding(ctx, entityName)
+					if err == nil {
+						vecResults, _ := e.vectorStore.SimilaritySearch(ctx, emb, 2, 0.45)
+						for _, vr := range vecResults {
+							if dp, err := e.store.GetDataPoint(ctx, vr.ID); err == nil && dp != nil {
+								additionalContext.WriteString(fmt.Sprintf("- Memory: %s\n", dp.Content))
+							}
+						}
+					}
+				}
+			}
+
+			currentContext += additionalContext.String()
+
+			lastResult = schema.ThinkResult{
+				Reasoning: result.Reasoning + "\n[Engine: Needed more context, retrieving...]",
+				Answer:    "Mảnh ký ức này chưa tồn tại trong hệ thống (Max hops reached).",
+			}
+		} else {
+			lastResult = schema.ThinkResult{
+				Reasoning: result.Reasoning,
+				Answer:    "Mảnh ký ức này chưa tồn tại trong hệ thống.",
+			}
+		}
+	}
+
+	lastResult.ContextUsed = initialResults
+	return &lastResult, nil
 }
 

@@ -492,6 +492,11 @@ type ThinkQuery struct {
 	Limit            int    `json:"limit"`             // Limit for vector search
 	HopDepth         int    `json:"hop_depth"`         // Depth of graph traversal (1 or 2)
 	IncludeReasoning bool   `json:"include_reasoning"` // If false, skip reasoning for faster answer
+
+	// Iterative Agentic Features
+	EnableThinking     bool `json:"enable_thinking"`      // Triggers iterative reasoning loop
+	MaxThinkingSteps   int  `json:"max_thinking_steps"`   // Max depth of iterations allowed
+	LearnRelationships bool `json:"learn_relationships"`  // Triggers relationship extraction & persistence upon success
 }
 
 // ThinkResult represents the structured output of a MemoryEngine Think operation

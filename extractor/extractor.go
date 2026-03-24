@@ -102,6 +102,9 @@ type LLMExtractor interface {
 	// ExtractRelationships detects relationships between entities
 	ExtractRelationships(ctx context.Context, text string, entities []schema.Node) ([]schema.Edge, error)
 
+	// ExtractBridgingRelationship creates a direct relationship summarizing an LLM's multi-hop reasoning sequence
+	ExtractBridgingRelationship(ctx context.Context, question string, answer string) (*schema.Edge, error)
+
 	// ExtractWithSchema extracts structured data using a Go struct schema
 	ExtractWithSchema(ctx context.Context, text string, schemaStruct interface{}) (interface{}, error)
 

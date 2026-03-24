@@ -116,10 +116,14 @@ func run() {
 		fmt.Printf("=== HỎI (%s) ===\n", q)
 
 		query := &schema.ThinkQuery{
-			Text:      q,
-			SessionID: "noisy-session-001",
-			Limit:     10,
-			HopDepth:  2,
+			Text:               q,
+			SessionID:          "noisy-session-001",
+			Limit:              3,
+			HopDepth:           2,
+			EnableThinking:     true,
+			MaxThinkingSteps:   3,
+			LearnRelationships: true,
+			IncludeReasoning:   true,
 		}
 
 		// The "Think" method will first vector-search concepts (like "Giám đốc điều hành TechViet", "bạn thân")
