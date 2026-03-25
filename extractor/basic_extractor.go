@@ -292,15 +292,22 @@ func (be *BasicExtractor) generateEntityPrompt(text string) string {
 	}
 
 	// Default generic prompt
-	return fmt.Sprintf(`Extract key entities from the following text.
-Identify important concepts, people, places, organizations, and other significant entities.
+	return fmt.Sprintf(`Extract key entities from the following text block (which may include chat history).
+Identify important people, places, organizations, and specific factual concepts.
 
-Text: %s
+CRITICAL INSTRUCTIONS:
+1. FOCUS primarily on new information in the "Current User Message" section if history is present.
+2. DO NOT extract meta-concepts about the system itself (e.g., "mảnh ký ức", "lịch sử", "thông tin", "hệ thống", "quá trình").
+3. DO NOT extract temporal words as entities (e.g., "bây giờ", "hôm qua").
+4. If the text says "I am [Name]", extract an Entity of type 'Person' with name '[Name]'.
+
+Text for extraction:
+%s
 
 Return a JSON object with an "entities" array. Each entity should have:
-- name: the entity name
-- type: the entity type (Concept, Entity, etc.)
-- properties: a JSON object containing key-value pairs of additional details (optional)`, text)
+- name: the entity name (canonical form)
+- type: the entity type (Person, Place, Organization, Concept, Item)
+- properties: a JSON object containing key-value pairs of additional details discovered in the text.`, text)
 }
 
 // generateRelationshipPrompt generates a prompt for relationship extraction
@@ -472,4 +479,51 @@ func extractName(props map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// ExtractRequestIntent detects if the user's message contains an intent to store information, answer a question, or delete data.
+func (be *BasicExtractor) ExtractRequestIntent(ctx context.Context, text string) (*schema.RequestIntent, error) {
+	prompt := fmt.Sprintf(`Analyze the following chat context and determine the user's intent for the LAST message.
+
+INTENT TYPES:
+1. STATEMENT/FACT: User is providing new information (e.g., "My name is Ben", "I have a dog named Vàng"). 
+2. QUERY: User is asking for information or checking memory (e.g., "What is my name?", "Tên chó nhà tôi là gì?").
+3. DELETE: User wants to forget information (e.g., "Forget my dog's name").
+
+Context (History + Current Message):
+%s
+
+RULES:
+- 'needs_vector_storage' is true ONLY for STATEMENT/FACT intents.
+- 'is_query' is true if the last message is a question or a request that needs an answer from memory.
+- If the last message is "cho nhà tôi tên gì", this is a QUERY (is_query: true).
+
+Return a JSON object with:
+- needs_vector_storage: boolean
+- is_query: boolean
+- is_delete: boolean
+- delete_targets: array of strings (for DELETE)
+- reasoning: brief explanation`, text)
+
+	type IntentResult struct {
+		NeedsVectorStorage bool     `json:"needs_vector_storage"`
+		IsQuery            bool     `json:"is_query"`
+		IsDelete           bool     `json:"is_delete"`
+		DeleteTargets      []string `json:"delete_targets"`
+		Reasoning          string   `json:"reasoning"`
+	}
+
+	var result IntentResult
+	_, err := be.provider.GenerateStructuredOutput(ctx, prompt, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract intent: %w", err)
+	}
+
+	return &schema.RequestIntent{
+		NeedsVectorStorage: result.NeedsVectorStorage,
+		IsQuery:            result.IsQuery,
+		IsDelete:           result.IsDelete,
+		DeleteTargets:      result.DeleteTargets,
+		Reasoning:          result.Reasoning,
+	}, nil
 }

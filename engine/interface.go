@@ -2,13 +2,16 @@ package engine
 
 import (
 	"context"
+	"time"
 
 	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // EngineConfig holds configuration for MemoryEngine
 type EngineConfig struct {
-	MaxWorkers int
+	MaxWorkers               int           `json:"max_workers"`
+	EnableBackgroundAnalysis bool          `json:"enable_background_analysis"`
+	AnalysisInterval         time.Duration `json:"analysis_interval"`
 }
 
 // AddOptions holds optional parameters for the Add operation
@@ -85,6 +88,66 @@ func WithWaitMemify(wait bool) MemifyOption {
 	}
 }
 
+// RequestOptions configures the Request operation
+type RequestOptions struct {
+	Metadata           map[string]interface{}
+	HopDepth           int
+	EnableThinking     bool
+	MaxThinkingSteps   int
+	LearnRelationships bool
+	IncludeReasoning   bool
+}
+
+// RequestOption configures RequestOptions
+type RequestOption func(*RequestOptions)
+
+// WithRequestMetadata adds custom metadata to the Request
+func WithRequestMetadata(metadata map[string]interface{}) RequestOption {
+	return func(o *RequestOptions) {
+		if o.Metadata == nil {
+			o.Metadata = make(map[string]interface{})
+		}
+		for k, v := range metadata {
+			o.Metadata[k] = v
+		}
+	}
+}
+
+// WithHopDepth sets the number of neighbor hops to traverse from anchors
+func WithHopDepth(depth int) RequestOption {
+	return func(o *RequestOptions) {
+		o.HopDepth = depth
+	}
+}
+
+// WithEnableThinking toggles the agentic/iterative thinking loop
+func WithEnableThinking(enable bool) RequestOption {
+	return func(o *RequestOptions) {
+		o.EnableThinking = enable
+	}
+}
+
+// WithMaxThinkingSteps sets the maximum iterations for missing entities
+func WithMaxThinkingSteps(steps int) RequestOption {
+	return func(o *RequestOptions) {
+		o.MaxThinkingSteps = steps
+	}
+}
+
+// WithLearnRelationships toggles automatic creation of bridging relationships
+func WithLearnRelationships(learn bool) RequestOption {
+	return func(o *RequestOptions) {
+		o.LearnRelationships = learn
+	}
+}
+
+// WithIncludeReasoning toggles inclusion of the thought process in the result
+func WithIncludeReasoning(include bool) RequestOption {
+	return func(o *RequestOptions) {
+		o.IncludeReasoning = include
+	}
+}
+
 // MemoryEngine defines the core memory operations
 type MemoryEngine interface {
 	// Core pipeline operations
@@ -94,6 +157,9 @@ type MemoryEngine interface {
 	Memify(ctx context.Context, dataPoint *schema.DataPoint, opts ...MemifyOption) error
 	Search(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error)
 	Think(ctx context.Context, query *schema.ThinkQuery) (*schema.ThinkResult, error)
+	// AnalyzeHistory processes recent chat history to extract deeper relationships or update existing ones
+	AnalyzeHistory(ctx context.Context, sessionID string) error
+	Request(ctx context.Context, sessionID string, content string, opts ...RequestOption) (*schema.ThinkResult, error)
 
 	// Memory operations
 	DeleteMemory(ctx context.Context, id string, sessionID string) error

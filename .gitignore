@@ -5,3 +5,6 @@ ai-memory-cli
 ai-memory-cli.zip
 data.txt
 memory-cli
+storage/memory.db
+memory_graph.db
+test_output.txt

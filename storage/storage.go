@@ -29,6 +29,8 @@ type Storage interface {
 	UpdateSession(ctx context.Context, session *schema.MemorySession) error
 	DeleteSession(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]*schema.MemorySession, error)
+	AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error
+	GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error)
 
 	// Batch operations
 	StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error
@@ -58,6 +60,8 @@ type RelationalStore interface {
 	UpdateSession(ctx context.Context, session *schema.MemorySession) error
 	DeleteSession(ctx context.Context, sessionID string) error
 	ListSessions(ctx context.Context, userID string) ([]*schema.MemorySession, error)
+	AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error
+	GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error)
 
 	// Batch operations
 	StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error
@@ -319,6 +323,7 @@ type Transaction interface {
 	// Session operations
 	StoreSession(ctx context.Context, session *schema.MemorySession) error
 	UpdateSession(ctx context.Context, session *schema.MemorySession) error
+	AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error
 
 	// Transaction control
 	Commit(ctx context.Context) error

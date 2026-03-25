@@ -647,6 +647,15 @@ func (m *mockStorage) StoreBatch(ctx context.Context, dataPoints []*schema.DataP
 	return nil
 }
 
+func (m *mockStorage) AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error {
+	return nil
+}
+
+func (m *mockStorage) GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error) {
+	return nil, nil
+}
+
+
 func (m *mockStorage) DeleteBatch(ctx context.Context, ids []string) error {
 	return nil
 }

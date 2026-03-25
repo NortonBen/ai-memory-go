@@ -136,6 +136,16 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN nodes TEXT")
 	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN edges TEXT")
 
+	// Table for session messages
+	sa.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS session_messages (
+		id TEXT PRIMARY KEY,
+		session_id TEXT,
+		role TEXT,
+		content TEXT,
+		timestamp DATETIME
+	)`)
+	sa.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_session_messages_session_id ON session_messages(session_id)`)
+
 	return nil
 }
 
@@ -556,6 +566,43 @@ func (sa *SQLiteAdapter) ListSessions(ctx context.Context, userID string) ([]*sc
 	}
 
 	return sessions, nil
+}
+
+// AddMessageToSession implements RelationalStore
+func (sa *SQLiteAdapter) AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error {
+	query := `
+		INSERT INTO session_messages (id, session_id, role, content, timestamp)
+		VALUES (?, ?, ?, ?, ?)
+	`
+	_, err := sa.db.ExecContext(ctx, query, message.ID, sessionID, string(message.Role), message.Content, message.Timestamp)
+	return err
+}
+
+// GetSessionMessages implements RelationalStore
+func (sa *SQLiteAdapter) GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error) {
+	query := `
+		SELECT id, role, content, timestamp
+		FROM session_messages WHERE session_id = ? ORDER BY timestamp ASC
+	`
+	rows, err := sa.db.QueryContext(ctx, query, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []schema.Message
+	for rows.Next() {
+		var msg schema.Message
+		var roleStr string
+		err := rows.Scan(&msg.ID, &roleStr, &msg.Content, &msg.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+		msg.Role = schema.Role(roleStr)
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
 }
 
 // StoreBatch implements RelationalStore

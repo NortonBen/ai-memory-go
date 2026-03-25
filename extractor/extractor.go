@@ -105,6 +105,9 @@ type LLMExtractor interface {
 	// ExtractBridgingRelationship creates a direct relationship summarizing an LLM's multi-hop reasoning sequence
 	ExtractBridgingRelationship(ctx context.Context, question string, answer string) (*schema.Edge, error)
 
+	// ExtractRequestIntent detects if the user's message contains an intent to store information into long-term vector storage
+	ExtractRequestIntent(ctx context.Context, text string) (*schema.RequestIntent, error)
+
 	// CompareEntities compares a new entity against an existing similar entity and determines consistency action
 	CompareEntities(ctx context.Context, existing schema.Node, newEntity schema.Node) (*schema.ConsistencyResult, error)
 

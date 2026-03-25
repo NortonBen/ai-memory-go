@@ -97,6 +97,14 @@ func (pa *PostgresAdapter) setupTables(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_session_id ON datapoints(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_user_id ON datapoints(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_sessions_user_id ON memory_sessions(user_id)`,
+		`CREATE TABLE IF NOT EXISTS session_messages (
+			id VARCHAR(255) PRIMARY KEY,
+			session_id VARCHAR(255) NOT NULL,
+			role VARCHAR(50) NOT NULL,
+			content TEXT NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_messages_session_id ON session_messages(session_id)`,
 	}
 
 	if pa.config.EnableJSONIndexes {
@@ -489,6 +497,55 @@ func (pa *PostgresAdapter) ListSessions(ctx context.Context, userID string) ([]*
 	}
 
 	return sessions, nil
+}
+
+// AddMessageToSession implements RelationalStore
+func (pa *PostgresAdapter) AddMessageToSession(ctx context.Context, sessionID string, msg *schema.Message) error {
+	query := `
+		INSERT INTO session_messages (id, session_id, role, content, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+	`
+	_, err := pa.db.ExecContext(ctx, query,
+		msg.ID, sessionID, msg.Role, msg.Content, msg.Timestamp)
+	return err
+}
+
+// GetSessionMessages implements RelationalStore
+func (pa *PostgresAdapter) GetSessionMessages(ctx context.Context, sessionID string, limit int) ([]schema.Message, error) {
+	queryStr := `
+		SELECT id, role, content, created_at
+		FROM session_messages
+		WHERE session_id = $1
+		ORDER BY created_at DESC
+	`
+	args := []interface{}{sessionID}
+	
+	if limit > 0 {
+		queryStr += " LIMIT $2"
+		args = append(args, limit)
+	}
+
+	rows, err := pa.db.QueryContext(ctx, queryStr, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []schema.Message
+	for rows.Next() {
+		var msg schema.Message
+		if err := rows.Scan(&msg.ID, &msg.Role, &msg.Content, &msg.Timestamp); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+
+	// Reverse the slice so chronological order is maintained (oldest to newest)
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
 }
 
 // StoreBatch implements RelationalStore

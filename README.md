@@ -31,13 +31,18 @@ This library implements a Data-Driven Pipeline using Go's concurrency features f
 package main
 
 import (
+    "context"
     "fmt"
-    "github.com/NortonBen/ai-memory-go"
+    "github.com/NortonBen/ai-memory-go/engine"
 )
 
 func main() {
+    ctx := context.Background()
+    // Assume engine is initialized with stores
+    // Memory engine smartly detects intent: extracts relation to Graph,
+    // and conditionally saves to Vector only if user provides a fact/document
+    // engine.Request(ctx, "session-123", "User: My favorite color is blue.")
     fmt.Println("AI Memory Integration - Go Library")
-    // More functionality coming soon...
 }
 ```
 

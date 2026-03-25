@@ -118,11 +118,29 @@ const (
 	StatusRetrying   ProcessingStatus = "retrying"
 )
 
+// Role defines the sender of a message
+type Role string
+
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleSystem    Role = "system"
+)
+
+// Message represents a single turn in a chat session
+type Message struct {
+	ID        string    `json:"id"`
+	Role      Role      `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // MemorySession manages isolated memory contexts
 type MemorySession struct {
 	ID         string                 `json:"id"`
 	UserID     string                 `json:"user_id,omitempty"`
 	Context    map[string]interface{} `json:"context"`
+	Messages   []Message              `json:"messages,omitempty"`
 	CreatedAt  time.Time              `json:"created_at"`
 	LastAccess time.Time              `json:"last_access"`
 	IsActive   bool                   `json:"is_active"`
@@ -224,6 +242,12 @@ func (ms *MemorySession) Clone() *MemorySession {
 		CreatedAt:  ms.CreatedAt,
 		LastAccess: time.Now(),
 		IsActive:   ms.IsActive,
+	}
+
+	// Deep copy messages
+	if ms.Messages != nil {
+		clone.Messages = make([]Message, len(ms.Messages))
+		copy(clone.Messages, ms.Messages)
 	}
 
 	// Deep copy context
@@ -509,6 +533,15 @@ type SearchResults struct {
 	ParsedContext string          `json:"parsed_context,omitempty"`
 }
 
+// RequestIntent determines the extracted intent of a user's request
+type RequestIntent struct {
+	NeedsVectorStorage bool     `json:"needs_vector_storage"`
+	IsQuery            bool     `json:"is_query"`
+	IsDelete           bool     `json:"is_delete"`
+	DeleteTargets      []string `json:"delete_targets,omitempty"`
+	Reasoning          string   `json:"reasoning,omitempty"`
+}
+
 // ThinkQuery parameters for iterative multi-hop agentic retrieval
 type ThinkQuery struct {
 	Text      string                 `json:"text"`
@@ -526,6 +559,7 @@ type ThinkQuery struct {
 
 // ThinkResult represents a single analytical step produced by the LLM
 type ThinkResult struct {
+	Intent          *RequestIntent `json:"intent,omitempty"`
 	Reasoning       string         `json:"reasoning,omitempty"`
 	MissingEntities []string       `json:"missing_entities,omitempty"`
 	Answer          string         `json:"answer,omitempty"`

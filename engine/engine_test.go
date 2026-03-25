@@ -1,15 +1,20 @@
 package engine
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/schema"
+	"github.com/NortonBen/ai-memory-go/storage"
+	"github.com/NortonBen/ai-memory-go/vector"
 )
 
 func TestNewMemoryEngine(t *testing.T) {
 	cfg := EngineConfig{MaxWorkers: 2}
 	
-	// Fast test to ensure initialization and closure without panic.
-	// For actual unit tests, robust mock implementations for 
-	// Extractor, EmbeddingProvider, and Storage are needed.
 	engine, ok := NewMemoryEngine(nil, nil, nil, cfg).(*defaultMemoryEngine)
 	if !ok || engine == nil {
 		t.Fatal("Expected NewMemoryEngine to return an instance of *defaultMemoryEngine")
@@ -20,4 +25,291 @@ func TestNewMemoryEngine(t *testing.T) {
 	}
 	
 	engine.Close()
+}
+
+// ----- Mocks for TestRequest -----
+
+type mockExtractor struct {
+	intent   schema.RequestIntent
+	entities []schema.Node
+	edges    []schema.Edge
+}
+
+func (m *mockExtractor) ExtractEntities(ctx context.Context, input string) ([]schema.Node, error) {
+	return m.entities, nil
+}
+
+func (m *mockExtractor) ExtractRelationships(ctx context.Context, input string, entities []schema.Node) ([]schema.Edge, error) {
+	return m.edges, nil
+}
+
+func (m *mockExtractor) ExtractRequestIntent(ctx context.Context, input string) (*schema.RequestIntent, error) {
+	return &m.intent, nil
+}
+
+func (m *mockExtractor) ExtractBridgingRelationship(ctx context.Context, q, a string) (*schema.Edge, error) {
+	return nil, nil
+}
+
+func (m *mockExtractor) CompareEntities(ctx context.Context, e1, e2 schema.Node) (*schema.ConsistencyResult, error) {
+	return &schema.ConsistencyResult{Action: schema.ResolutionUpdate, Reason: "mock"}, nil
+}
+
+func (m *mockExtractor) ExtractWithSchema(ctx context.Context, text string, schemaStruct interface{}) (interface{}, error) {
+	// Return a dummy result that maps to schema.ThinkResult structure
+	return map[string]interface{}{
+		"answer":    "this is a mock answer",
+		"reasoning": "this is mock reasoning",
+	}, nil
+}
+
+type mockLLMProvider struct {
+	extractor.LLMProvider
+}
+
+func (m *mockLLMProvider) GenerateCompletion(ctx context.Context, prompt string) (string, error) {
+	return "mock completion", nil
+}
+
+func (m *mockLLMProvider) GetModel() string {
+	return "mock-model"
+}
+
+func (m *mockExtractor) GetProvider() extractor.LLMProvider {
+	return &mockLLMProvider{}
+}
+
+func (m *mockExtractor) SetProvider(p extractor.LLMProvider) {}
+
+func (m *mockExtractor) Close() error { return nil }
+
+type mockStorage struct {
+	dataPoints map[string]*schema.DataPoint
+	messages   map[string][]schema.Message
+}
+
+func newMockStorage() *mockStorage {
+	return &mockStorage{
+		dataPoints: make(map[string]*schema.DataPoint),
+		messages:   make(map[string][]schema.Message),
+	}
+}
+
+func (m *mockStorage) StoreDataPoint(ctx context.Context, dp *schema.DataPoint) error {
+	m.dataPoints[dp.ID] = dp
+	return nil
+}
+
+func (m *mockStorage) QueryDataPoints(ctx context.Context, query *storage.DataPointQuery) ([]*schema.DataPoint, error) {
+	var res []*schema.DataPoint
+	for _, dp := range m.dataPoints {
+		if query.SearchText != "" && dp.Content == query.SearchText && dp.SessionID == query.SessionID {
+			res = append(res, dp)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) { return nil, nil }
+func (m *mockStorage) UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error { return nil }
+func (m *mockStorage) DeleteDataPoint(ctx context.Context, id string) error { return nil }
+func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error { return nil }
+func (m *mockStorage) StoreSession(ctx context.Context, session *schema.MemorySession) error { return nil }
+func (m *mockStorage) GetSession(ctx context.Context, sessionID string) (*schema.MemorySession, error) { return nil, nil }
+func (m *mockStorage) UpdateSession(ctx context.Context, session *schema.MemorySession) error { return nil }
+func (m *mockStorage) DeleteSession(ctx context.Context, sessionID string) error { return nil }
+func (m *mockStorage) ListSessions(ctx context.Context, userID string) ([]*schema.MemorySession, error) { return nil, nil }
+func (m *mockStorage) StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error { return nil }
+func (m *mockStorage) DeleteBatch(ctx context.Context, ids []string) error { return nil }
+func (m *mockStorage) AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error {
+	m.messages[sessionID] = append(m.messages[sessionID], message)
+	return nil
+}
+func (m *mockStorage) GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error) {
+	return m.messages[sessionID], nil
+}
+
+func (m *mockStorage) Health(ctx context.Context) error { return nil }
+func (m *mockStorage) Close() error { return nil }
+
+type mockEmbedder struct{}
+func (m *mockEmbedder) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	return []float32{1.0, 0.0, 0.0}, nil
+}
+func (m *mockEmbedder) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, nil
+}
+func (m *mockEmbedder) Name() string { return "mock" }
+func (m *mockEmbedder) GetDimensions() int { return 3 }
+func (m *mockEmbedder) GetModel() string { return "mock-model" }
+func (m *mockEmbedder) Health(ctx context.Context) error { return nil }
+
+
+
+// ----- Tests -----
+
+func TestRequest(t *testing.T) {
+	t.Run("Does not vectorize when NeedsVectorStorage is false", func(t *testing.T) {
+		ext := &mockExtractor{
+			intent: schema.RequestIntent{NeedsVectorStorage: false, Reasoning: "just chat"},
+			entities: []schema.Node{
+				{ID: "node1", Type: "Person"},
+			},
+		}
+		
+		store := newMockStorage()
+		graphStore := graph.NewInMemoryGraphStore()
+		vecStore := vector.NewInMemoryStore(nil)
+		emb := &mockEmbedder{}
+		
+		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+		defer engine.Close()
+
+		ctx := context.Background()
+		_, err := engine.Request(ctx, "session-1", "Hello there")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Wait briefly for any async operations (should be none for vector)
+		time.Sleep(50 * time.Millisecond)
+
+		// Check vector/relational storage
+		if len(store.dataPoints) != 0 {
+			t.Errorf("expected 0 data points stored, got %d", len(store.dataPoints))
+		}
+
+		// Check graph storage - should be populated regardless of NeedsVectorStorage
+		count, _ := graphStore.GetNodeCount(ctx)
+		if count != 1 {
+			t.Errorf("expected 1 node stored, got %d", count)
+		}
+	})
+
+	t.Run("Vectorizes when NeedsVectorStorage is true", func(t *testing.T) {
+		ext := &mockExtractor{
+			intent: schema.RequestIntent{NeedsVectorStorage: true, Reasoning: "user stated a fact"},
+		}
+		
+		store := newMockStorage()
+		graphStore := graph.NewInMemoryGraphStore()
+		vecStore := vector.NewInMemoryStore(nil)
+		emb := &mockEmbedder{}
+		
+		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+		defer engine.Close()
+
+		ctx := context.Background()
+		_, err := engine.Request(ctx, "session-2", "My name is Alice.")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// wait for Cognify task queue to process
+		time.Sleep(100 * time.Millisecond)
+
+		// Check storage
+		if len(store.dataPoints) != 1 {
+			t.Errorf("expected 1 data point stored, got %d", len(store.dataPoints))
+		}
+
+		// Need to ensure the worker actually processed it. Since InMemory VectorStore is synchronous and 
+		// we submit to a worker pool, the sleep should suffice for this basic test.
+		count, _ := vecStore.GetEmbeddingCount(ctx)
+		if count != 1 {
+			t.Errorf("expected 1 embedding stored, got %d", count)
+		}
+	})
+
+	t.Run("Returns ThinkResult when IsQuery is true", func(t *testing.T) {
+		ext := &mockExtractor{
+			intent: schema.RequestIntent{IsQuery: true, Reasoning: "user asked a question"},
+		}
+		
+		store := newMockStorage()
+		graphStore := graph.NewInMemoryGraphStore()
+		vecStore := vector.NewInMemoryStore(nil)
+		emb := &mockEmbedder{}
+		
+		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+		defer engine.Close()
+
+		ctx := context.Background()
+		res, err := engine.Request(ctx, "session-q", "What is my name?")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res == nil {
+			t.Fatal("expected ThinkResult, got nil")
+		}
+	})
+
+	t.Run("Deletes graph nodes when IsDelete is true", func(t *testing.T) {
+		ext := &mockExtractor{
+			intent: schema.RequestIntent{IsDelete: true, DeleteTargets: []string{"Alice"}},
+		}
+		
+		store := newMockStorage()
+		graphStore := graph.NewInMemoryGraphStore()
+		vecStore := vector.NewInMemoryStore(nil)
+		emb := &mockEmbedder{}
+		
+		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+		defer engine.Close()
+
+		// Add a node first
+		ctx := context.Background()
+		node := &schema.Node{ID: "nodeA", Properties: map[string]interface{}{"name": "Alice"}}
+		graphStore.StoreNode(ctx, node)
+
+		res, err := engine.Request(ctx, "session-d", "Forget about Alice.")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res == nil {
+			t.Fatal("expected ThinkResult, got nil")
+		}
+		
+		// Verify node is deleted
+		nodes, _ := graphStore.FindNodesByEntity(ctx, "Alice", "")
+		if len(nodes) != 0 {
+			t.Errorf("expected 0 nodes, got %d", len(nodes))
+		}
+	})
+
+	t.Run("Injects chat history into context", func(t *testing.T) {
+		ext := &mockExtractor{
+			intent: schema.RequestIntent{IsQuery: true, Reasoning: "testing history"},
+		}
+		
+		store := newMockStorage()
+		graphStore := graph.NewInMemoryGraphStore()
+		vecStore := vector.NewInMemoryStore(nil)
+		emb := &mockEmbedder{}
+		
+		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+		defer engine.Close()
+
+		ctx := context.Background()
+		sessionID := "session-hist"
+		
+		// 1. Initial request (adds 1 user msg, 1 asst msg)
+		engine.Request(ctx, sessionID, "Hello, my name is Bob.")
+		
+		// 2. Second request
+		engine.Request(ctx, sessionID, "What is my name?")
+		
+		// 3. We should have 4 messages in storage
+		msgs, _ := store.GetSessionMessages(ctx, sessionID)
+		if len(msgs) != 4 {
+			t.Errorf("expected 4 messages in history, got %d", len(msgs))
+		}
+
+		if msgs[0].Role != schema.RoleUser || msgs[0].Content != "Hello, my name is Bob." {
+			t.Errorf("expected first message to be user Bob greeting")
+		}
+		if msgs[1].Role != schema.RoleAssistant {
+			t.Errorf("expected second message to be assistant")
+		}
+	})
 }
