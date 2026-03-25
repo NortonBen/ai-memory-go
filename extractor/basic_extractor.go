@@ -484,33 +484,40 @@ func extractName(props map[string]interface{}) string {
 // ExtractRequestIntent detects if the user's message contains an intent to store information, answer a question, or delete data.
 func (be *BasicExtractor) ExtractRequestIntent(ctx context.Context, text string) (*schema.RequestIntent, error) {
 	prompt := fmt.Sprintf(`Analyze the following chat context and determine the user's intent for the LAST message.
-
-INTENT TYPES:
-1. STATEMENT/FACT: User is providing new information (e.g., "My name is Ben", "I have a dog named Vàng"). 
-2. QUERY: User is asking for information or checking memory (e.g., "What is my name?", "Tên chó nhà tôi là gì?").
-3. DELETE: User wants to forget information (e.g., "Forget my dog's name").
+Also, identify relationships between participants or mentioned entities:
+- BOT <-> USER (the current user talking)
+- USER <-> USER (relationships between people)
+- USER <-> ENTITY (ownership, association with objects/animals/places)
 
 Context (History + Current Message):
 %s
 
 RULES:
-- 'needs_vector_storage' is true ONLY for STATEMENT/FACT intents.
-- 'is_query' is true if the last message is a question or a request that needs an answer from memory.
-- If the last message is "cho nhà tôi tên gì", this is a QUERY (is_query: true).
+- 'is_delete' is true ONLY for explicit commands to delete or forget information (e.g., "Xóa thông tin...", "Quên đi..."). 
+- Factual corrections (e.g., "không phải X mà là Y", "nó không phải 1 tuổi") are STATEMENT intents, NOT delete intents.
+- Use the provided HISTORY as a primary source of context to resolve all references, pronouns, and implied subjects in the current message.
+- For possession (e.g., "nhà tôi", "của tôi", "my"), resolve to the 'User' entity.
+- Capture state-change facts (e.g., "đã mất" -> relationship: ("Vàng", "is", "dead") or ("Vàng", "status", "passed away")).
+- Output ONLY the JSON object.
+  - 'from'/'to' should be specific entity names derived from history (e.g., "Ben", "Bot", "Con chó Đen"). Do NOT use pronouns in 'from'/'to' if they can be resolved.
+  - Connect concepts across sentences (e.g., if one turn mentions "X" and the next turn says "Y is part of it", identify the relationship using "X").
+  - 'type' should be a standard relationship type (e.g., "FRIEND_OF", "OWNS", "LIVES_IN", "BORN_IN", "HAS_AGE", "HAS_STATUS").
 
 Return a JSON object with:
 - needs_vector_storage: boolean
 - is_query: boolean
 - is_delete: boolean
 - delete_targets: array of strings (for DELETE)
+- relationships: array of {from: string, to: string, type: string}
 - reasoning: brief explanation`, text)
 
 	type IntentResult struct {
-		NeedsVectorStorage bool     `json:"needs_vector_storage"`
-		IsQuery            bool     `json:"is_query"`
-		IsDelete           bool     `json:"is_delete"`
-		DeleteTargets      []string `json:"delete_targets"`
-		Reasoning          string   `json:"reasoning"`
+		NeedsVectorStorage bool                    `json:"needs_vector_storage"`
+		IsQuery            bool                    `json:"is_query"`
+		IsDelete           bool                    `json:"is_delete"`
+		DeleteTargets      []string                `json:"delete_targets"`
+		Relationships      []schema.RelationshipInfo `json:"relationships"`
+		Reasoning          string                  `json:"reasoning"`
 	}
 
 	var result IntentResult
@@ -524,6 +531,7 @@ Return a JSON object with:
 		IsQuery:            result.IsQuery,
 		IsDelete:           result.IsDelete,
 		DeleteTargets:      result.DeleteTargets,
+		Relationships:      result.Relationships,
 		Reasoning:          result.Reasoning,
 	}, nil
 }

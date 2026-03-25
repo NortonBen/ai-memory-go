@@ -353,14 +353,14 @@ func (img *InMemoryGraphStore) FindNodesByProperty(ctx context.Context, property
 	return result, nil
 }
 
-// FindNodesByEntity finds nodes by entity name and type
+// FindNodesByEntity finds nodes by entity name and type. If entityType is empty, matches any type.
 func (img *InMemoryGraphStore) FindNodesByEntity(ctx context.Context, entityName string, entityType schema.NodeType) ([]*schema.Node, error) {
 	img.mu.RLock()
 	defer img.mu.RUnlock()
 
 	result := make([]*schema.Node, 0)
 	for _, node := range img.nodes {
-		if node.Type == entityType {
+		if entityType == "" || node.Type == entityType {
 			if name, ok := node.Properties["name"].(string); ok && name == entityName {
 				result = append(result, node)
 			}
@@ -434,12 +434,36 @@ func (img *InMemoryGraphStore) GetNodeCount(ctx context.Context) (int64, error) 
 	return int64(len(img.nodes)), nil
 }
 
+// ListNodes returns all nodes in the graph
+func (img *InMemoryGraphStore) ListNodes(ctx context.Context) ([]*schema.Node, error) {
+	img.mu.RLock()
+	defer img.mu.RUnlock()
+
+	nodes := make([]*schema.Node, 0, len(img.nodes))
+	for _, node := range img.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
+}
+
 // GetEdgeCount returns the total number of edges
 func (img *InMemoryGraphStore) GetEdgeCount(ctx context.Context) (int64, error) {
 	img.mu.RLock()
 	defer img.mu.RUnlock()
 
 	return int64(len(img.edges)), nil
+}
+
+// ListEdges returns all edges in the graph
+func (img *InMemoryGraphStore) ListEdges(ctx context.Context) ([]*schema.Edge, error) {
+	img.mu.RLock()
+	defer img.mu.RUnlock()
+
+	edges := make([]*schema.Edge, 0, len(img.edges))
+	for _, edge := range img.edges {
+		edges = append(edges, edge)
+	}
+	return edges, nil
 }
 
 // GetConnectedComponents finds all connected components in the graph

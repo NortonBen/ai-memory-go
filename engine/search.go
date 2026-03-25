@@ -57,9 +57,16 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 		return nil, fmt.Errorf("failed to generate embedding for query: %w", err)
 	}
 
+	// Fetch recent history Context for better entity resolution
+	historyContext := e.getHistoryBuffer(ctx, query.SessionID, 10)
+	var extractionInput = query.Text
+	if historyContext != "" {
+		extractionInput = fmt.Sprintf("HISTORY:\n%s\n\nCURRENT USER MESSAGE:\n%s", historyContext, query.Text)
+	}
+
 	var extractedEntities []*schema.Node
 	if e.extractor != nil {
-		extractedNodes, err := e.extractor.ExtractEntities(ctx, query.Text)
+		extractedNodes, err := e.extractor.ExtractEntities(ctx, extractionInput)
 		if err == nil {
 			for i := range extractedNodes {
 				extractedEntities = append(extractedEntities, &extractedNodes[i])
@@ -82,8 +89,6 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 			dp, err := e.store.GetDataPoint(ctx, id)
 			if err == nil && dp != nil {
 				scores[id] = &itemScore{dp: dp}
-			} else {
-				fmt.Printf(" [DEBUG] trackDataPoint failed for id=%s: err=%v, dp=%v\n", id, err, dp)
 			}
 		}
 		return scores[id]
@@ -135,6 +140,8 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 			for _, n := range nodes {
 				anchorNodeIDs[n.ID] = true
 			}
+		} else {
+			fmt.Printf(" [DEBUG Search] Error searching for '%s': %v\n", name, err)
 		}
 	}
 
@@ -238,9 +245,21 @@ func (e *defaultMemoryEngine) Search(ctx context.Context, query *schema.SearchQu
 	// ---------------------------------------------------------
 	// Step 4c: LLM Answer Generation (Plain text)
 	// ---------------------------------------------------------
-	if len(results.Results) > 0 && e.extractor != nil && e.extractor.GetProvider() != nil {
-		prompt := fmt.Sprintf("You are an intelligent memory assistant. Use the following context to answer the user's query.\n\nContext:\n%s\n\nUser Query: %s\n\nAnswer:", results.ParsedContext, query.Text)
-		answer, err := e.extractor.GetProvider().GenerateCompletion(ctx, prompt)
+	if e.extractor != nil && e.extractor.GetProvider() != nil {
+		// Enhancement: Prepend recent chat history to ensure context awareness for pronouns
+		historyContext := e.getHistoryBuffer(ctx, query.SessionID, 10)
+		var finalPromptBuilder strings.Builder
+		if historyContext != "" {
+			finalPromptBuilder.WriteString("Recent Conversation History:\n")
+			finalPromptBuilder.WriteString(historyContext)
+			finalPromptBuilder.WriteString("\n")
+		}
+
+		finalPromptBuilder.WriteString("Use the following context to answer the user's query.\n\nContext:\n")
+		finalPromptBuilder.WriteString(results.ParsedContext)
+		finalPromptBuilder.WriteString(fmt.Sprintf("\n\nUser Query: %s\n\nAnswer:", query.Text))
+
+		answer, err := e.extractor.GetProvider().GenerateCompletion(ctx, finalPromptBuilder.String())
 		if err == nil {
 			results.Answer = answer
 		} else {

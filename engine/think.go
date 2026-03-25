@@ -51,18 +51,24 @@ func (e *defaultMemoryEngine) singleShotThink(ctx context.Context, provider extr
 }`
 	}
 
+	// Fetch history buffer
+	historyBuffer := e.getHistoryBuffer(ctx, query.SessionID, 10)
+
 	prompt := fmt.Sprintf(`You are an AI assistant powered by a Memory Engine.
-Use the following retrieved context (Vector Memories and Knowledge Graph relationships) to answer the user's question accurately.
-If the answer is not contained in the context, say "Mảnh ký ức này chưa tồn tại trong hệ thống." or answer based on available knowledge, but explicitly state what is missing.
+Use the following retrieved context (Vector Memories and Knowledge Graph relationships) and recent conversation history to answer the user's question accurately.
+If the answer is not contained in the context or history, say "Mảnh ký ức này chưa tồn tại trong hệ thống." or answer based on available knowledge, but explicitly state what is missing.
 
 You MUST respond in clean JSON format matching this schema:
+%s
+
+Recent Conversation History:
 %s
 
 Context:
 %s
 
 Question: %s
-JSON Response:`, jsonFormatRequirement, results.ParsedContext, query.Text)
+JSON Response:`, jsonFormatRequirement, historyBuffer, results.ParsedContext, query.Text)
 
 	responseStr, err := provider.GenerateCompletion(ctx, prompt)
 	if err != nil {
@@ -108,9 +114,12 @@ func (e *defaultMemoryEngine) iterativeThink(ctx context.Context, provider extra
 	}
 
 	for step := 1; step <= maxSteps; step++ {
+		// Fetch history buffer
+		historyBuffer := e.getHistoryBuffer(ctx, query.SessionID, 10)
+
 		prompt := fmt.Sprintf(`You are an AI assistant powered by a Memory Engine.
-Use the following retrieved context to answer the user's question accurately.
-If the answer is missing from the context, identify the exact entities (names of people, organizations, concepts) that you need more information about to answer the question, and place them in 'missing_entities'.
+Use the following retrieved context and recent conversation history to answer the user's question accurately.
+If the answer is missing from the context and history, identify the exact entities (names of people, organizations, concepts) that you need more information about to answer the question, and place them in 'missing_entities'.
 
 You MUST ALWAYS respond in clean JSON format matching the schema below. 
 You MUST ALWAYS include the 'reasoning' field to explain your thought process.
@@ -125,11 +134,14 @@ Example valid response:
   "answer": ""
 }
 
+Recent Conversation History:
+%s
+
 Context:
 %s
 
 Question: %s
-JSON Response:`, jsonFormatRequirement, currentContext, query.Text)
+JSON Response:`, jsonFormatRequirement, historyBuffer, currentContext, query.Text)
 
 		responseStr, err := provider.GenerateCompletion(ctx, prompt)
 		if err != nil {

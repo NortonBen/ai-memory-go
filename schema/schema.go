@@ -533,13 +533,21 @@ type SearchResults struct {
 	ParsedContext string          `json:"parsed_context,omitempty"`
 }
 
+// RelationshipInfo represents a detected relationship between participants or entities
+type RelationshipInfo struct {
+	From string   `json:"from"`
+	To   string   `json:"to"`
+	Type EdgeType `json:"type"`
+}
+
 // RequestIntent determines the extracted intent of a user's request
 type RequestIntent struct {
-	NeedsVectorStorage bool     `json:"needs_vector_storage"`
-	IsQuery            bool     `json:"is_query"`
-	IsDelete           bool     `json:"is_delete"`
-	DeleteTargets      []string `json:"delete_targets,omitempty"`
-	Reasoning          string   `json:"reasoning,omitempty"`
+	NeedsVectorStorage bool               `json:"needs_vector_storage"`
+	IsQuery            bool               `json:"is_query"`
+	IsDelete           bool               `json:"is_delete"`
+	DeleteTargets      []string           `json:"delete_targets,omitempty"`
+	Relationships      []RelationshipInfo `json:"relationships,omitempty"`
+	Reasoning          string             `json:"reasoning,omitempty"`
 }
 
 // ThinkQuery parameters for iterative multi-hop agentic retrieval

@@ -940,6 +940,32 @@ func DefaultExtractionConfig() *ExtractionConfig {
 		MaxRetries:    3,
 		UseJSONSchema: true,
 		StrictMode:    false,
+		EntityPrompt: `Extract key entities from the following text block.
+Identify important people, places, organizations, and specific factual concepts.
+
+CRITICAL INSTRUCTIONS:
+1. FOCUS primarily on new information in the "Current User Message" section if history is present.
+2. DO NOT extract meta-concepts about the system itself (e.g., "mảnh ký ức", "lịch sử", "thông tin", "hệ thống", "quá trình").
+3. DO NOT extract temporal words as entities (e.g., "bây giờ", "hôm qua").
+4. If the text says "I am [Name]", extract an Entity of type 'Person' with name '[Name]'.
+
+Text for extraction:
+{text}`,
+		RelationshipPrompt: `Given these entities: {entities}
+
+Analyze the following text and identify relationships between the entities:
+{text}
+
+Return a JSON object with a "relationships" array. Each relationship should have:
+- from: source entity name
+- to: target entity name
+- type: relationship type (RELATED_TO, OWNS, LIVES_IN, FRIEND_OF, HAS_STATUS, HAS_AGE, etc.)
+- weight: relationship strength (0.0 to 1.0, optional)
+
+IMPORTANT:
+- Use the text context to specify the most accurate relationship type.
+- Resolve pronouns (it, he, she, they) to the given entities.
+- Capture status/state changes (e.g. "Vàng đã mất" -> "Vàng" HAS_STATUS "DIED").`,
 	}
 }
 

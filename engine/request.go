@@ -23,7 +23,7 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 		return nil, fmt.Errorf("extractor is required for Request")
 	}
 
-	// 1. Save user's message to history
+	// 1. Save user's message to history first (to maintain chronological order)
 	userMsg := schema.Message{
 		ID:        uuid.New().String(),
 		Role:      schema.RoleUser,
@@ -34,30 +34,15 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 		_ = e.store.AddMessageToSession(ctx, sessionID, userMsg)
 	}
 
-	// 2. Load recent history
-	var historyContext string
-	if e.store != nil && sessionID != "" {
-		messages, err := e.store.GetSessionMessages(ctx, sessionID)
-		if err == nil && len(messages) > 0 {
-			var sb strings.Builder
-			sb.WriteString("Chat History:\n")
-			start := 0
-			if len(messages) > 6 {
-				start = len(messages) - 6 // Last 3 interactions (3 user, 3 assistant)
-			}
-			for _, m := range messages[start:] {
-				sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
-			}
-			historyContext = sb.String()
-		}
-	}
+	// 2. Fetch recent history Context
+	historyContext := e.getHistoryBuffer(ctx, sessionID, 10)
 
 	extractionInput := content
 	if historyContext != "" {
 		extractionInput = fmt.Sprintf("HISTORY:\n%s\n\nCURRENT USER MESSAGE:\n%s", historyContext, content)
 	}
 
-	// 3. Determine Intent
+	// 2. Determine Intent & Extract Relationships
 	intent, err := e.extractor.ExtractRequestIntent(ctx, extractionInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract intent: %w", err)
@@ -65,6 +50,12 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 
 	var finalAnswer string
 	var finalReasoning []string
+
+	// 3. Process Relationships (Bot-User, User-User)
+	if len(intent.Relationships) > 0 && e.graphStore != nil {
+		e.processRelationships(ctx, sessionID, intent.Relationships)
+		finalReasoning = append(finalReasoning, fmt.Sprintf("Analyzed %d relationships from context.", len(intent.Relationships)))
+	}
 
 	// 4. Handle Deletion Intent
 	if intent.IsDelete {
@@ -89,8 +80,6 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 	}
 
 	// 5. Handle Statement/Fact Intent (Graph & Vector)
-	// We always try to extract entities from the current message + context
-	// to learn relationships from user feedback or statements
 	if e.graphStore != nil {
 		entities, err := e.extractor.ExtractEntities(ctx, extractionInput)
 		if err == nil && len(entities) > 0 {
@@ -111,23 +100,22 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 					_ = e.graphStore.CreateRelationship(ctx, &edge)
 				}
 			}
-			finalReasoning = append(finalReasoning, "Updated knowledge graph.")
+			finalReasoning = append(finalReasoning, "Updated knowledge graph with facts.")
 		}
 	}
 
-	if intent.NeedsVectorStorage {
+	if intent.NeedsVectorStorage || (len(intent.Relationships) > 0) {
 		addOpts := []AddOption{WithSessionID(sessionID), WithMetadata(options.Metadata)}
 		dp, err := e.Add(ctx, content, addOpts...)
 		if err == nil {
 			_, _ = e.Cognify(ctx, dp, WithWaitCognify(false))
-			finalReasoning = append(finalReasoning, "Added raw memory to vector store.")
+			finalReasoning = append(finalReasoning, "Added raw memory/context to vector store.")
 		}
 	}
 
 	// 6. Handle Query / Generation
 	var result *schema.ThinkResult
 	if intent.IsQuery {
-		// Default values for agentic thinking
 		hopDepth := options.HopDepth
 		if hopDepth <= 0 {
 			hopDepth = 2
@@ -155,7 +143,7 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 		}
 	}
 
-	// If it wasn't a query but we did operations, provide a default response
+	// 7. Save Assistant's Response & Default answers
 	if finalAnswer == "" {
 		if intent.IsDelete {
 			finalAnswer = "I have forgotten the requested information."
@@ -172,7 +160,7 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 	}
 	result.Intent = intent
 
-	// 7. Save Assistant's Response to history
+	// 8. Save Assistant's Response to history
 	asstMsg := schema.Message{
 		ID:        uuid.New().String(),
 		Role:      schema.RoleAssistant,
@@ -184,6 +172,60 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 	}
 
 	return result, nil
+}
+
+func (e *defaultMemoryEngine) processRelationships(ctx context.Context, sessionID string, relationships []schema.RelationshipInfo) {
+	for _, rel := range relationships {
+		// Try to find if nodes already exist for these names in this session
+		fromID := e.findOrCreateEntityNode(ctx, sessionID, rel.From)
+		toID := e.findOrCreateEntityNode(ctx, sessionID, rel.To)
+		
+		// Create the relationship
+		edge := schema.NewEdge(fromID, toID, rel.Type, 1.0)
+		edge.SessionID = sessionID
+		_ = e.graphStore.CreateRelationship(ctx, edge)
+	}
+}
+
+func (e *defaultMemoryEngine) findOrCreateEntityNode(ctx context.Context, sessionID, name string) string {
+	if name == "" {
+		return ""
+	}
+	
+	// SEARCH by name or entity in graph
+	// Try 'name' first
+	nodes, err := e.graphStore.FindNodesByProperty(ctx, "name", name)
+	if err != nil || len(nodes) == 0 {
+		// Try 'entity' property (used by some extractors)
+		nodes, err = e.graphStore.FindNodesByProperty(ctx, "entity", name)
+	}
+
+	if err == nil && len(nodes) > 0 {
+		// Check if any node is from this session or a global node
+		for _, n := range nodes {
+			if n.SessionID == sessionID || n.SessionID == "" {
+				return n.ID
+			}
+		}
+	}
+	
+	// CREATE new node if not found
+	node := schema.NewNode(schema.NodeTypeEntity, map[string]interface{}{"name": name, "entity": name})
+	node.SessionID = sessionID
+	_ = e.graphStore.StoreNode(ctx, node)
+	
+	// Ensure the new node is immediately searchable via vector
+	if e.vectorStore != nil && e.embedder != nil {
+		dp := &schema.DataPoint{
+			ID:          node.ID,
+			Content:     name,
+			ContentType: string(schema.NodeTypeEntity),
+			SessionID:   sessionID,
+		}
+		_, _ = e.Cognify(ctx, dp, WithWaitCognify(false))
+	}
+
+	return node.ID
 }
 
 // AnalyzeHistory processes recent chat history to extract deeper relationships or update existing ones

@@ -233,3 +233,23 @@ func (e *defaultMemoryEngine) cleanJSONResponse(resp string) string {
 	resp = strings.TrimSuffix(resp, "```")
 	return strings.TrimSpace(resp)
 }
+// getHistoryBuffer returns the last N messages formatted for context injection.
+func (e *defaultMemoryEngine) getHistoryBuffer(ctx context.Context, sessionID string, limit int) string {
+	if e.store == nil || sessionID == "" {
+		return ""
+	}
+	messages, err := e.store.GetSessionMessages(ctx, sessionID)
+	if err != nil || len(messages) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	start := 0
+	if len(messages) > limit {
+		start = len(messages) - limit
+	}
+	for _, m := range messages[start:] {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
+	}
+	return sb.String()
+}
