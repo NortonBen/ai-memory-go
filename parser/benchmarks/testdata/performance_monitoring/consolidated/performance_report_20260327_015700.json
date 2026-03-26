@@ -1,0 +1,153 @@
+{
+  "timestamp": "2026-03-27T01:57:00.18893+07:00",
+  "system_info": {
+    "os": "darwin",
+    "architecture": "arm64",
+    "num_cpu": 12,
+    "go_version": "go1.26.0",
+    "max_procs": 12
+  },
+  "test_results": [
+    {
+      "name": "Baseline_SmallFile_1KB",
+      "duration": 25000000,
+      "memory_usage_mb": 1.6,
+      "allocations_per_op": 250,
+      "throughput_mbps": 30,
+      "chunks_produced": 100,
+      "status": "PASS"
+    },
+    {
+      "name": "Baseline_MediumFile_10KB",
+      "duration": 50000000,
+      "memory_usage_mb": 4,
+      "allocations_per_op": 1000,
+      "throughput_mbps": 150,
+      "chunks_produced": 100,
+      "status": "PASS"
+    },
+    {
+      "name": "TestParserScalability",
+      "duration": 100000000,
+      "memory_usage_mb": 10,
+      "allocations_per_op": 1000,
+      "throughput_mbps": 80,
+      "chunks_produced": 50,
+      "status": "PASS"
+    },
+    {
+      "name": "TestStreamingMemoryEfficiency",
+      "duration": 150000000,
+      "memory_usage_mb": 15,
+      "allocations_per_op": 1500,
+      "throughput_mbps": 90,
+      "chunks_produced": 75,
+      "status": "PASS"
+    },
+    {
+      "name": "TestCachePerformance",
+      "duration": 200000000,
+      "memory_usage_mb": 20,
+      "allocations_per_op": 2000,
+      "throughput_mbps": 100,
+      "chunks_produced": 100,
+      "status": "PASS"
+    },
+    {
+      "name": "TestFormatDetection",
+      "duration": 250000000,
+      "memory_usage_mb": 25,
+      "allocations_per_op": 2500,
+      "throughput_mbps": 110,
+      "chunks_produced": 125,
+      "status": "PASS"
+    },
+    {
+      "name": "TestConcurrentLoad",
+      "duration": 300000000,
+      "memory_usage_mb": 30,
+      "allocations_per_op": 3000,
+      "throughput_mbps": 120,
+      "chunks_produced": 150,
+      "status": "SKIP"
+    }
+  ],
+  "benchmark_results": [
+    {
+      "name": "BenchmarkUnifiedParser",
+      "iterations": 1000,
+      "ns_per_op": 72000,
+      "mb_per_sec": 122,
+      "allocs_per_op": 320,
+      "bytes_per_op": 3224
+    },
+    {
+      "name": "BenchmarkChunkingStrategies",
+      "iterations": 1000,
+      "ns_per_op": 77000,
+      "mb_per_sec": 127,
+      "allocs_per_op": 370,
+      "bytes_per_op": 3724
+    },
+    {
+      "name": "BenchmarkWorkerPoolScaling",
+      "iterations": 1000,
+      "ns_per_op": 76000,
+      "mb_per_sec": 126,
+      "allocs_per_op": 360,
+      "bytes_per_op": 3624
+    },
+    {
+      "name": "BenchmarkMemoryEfficiency",
+      "iterations": 1000,
+      "ns_per_op": 75000,
+      "mb_per_sec": 125,
+      "allocs_per_op": 350,
+      "bytes_per_op": 3524
+    },
+    {
+      "name": "BenchmarkConcurrentParsing",
+      "iterations": 1000,
+      "ns_per_op": 76000,
+      "mb_per_sec": 126,
+      "allocs_per_op": 360,
+      "bytes_per_op": 3624
+    }
+  ],
+  "baseline_results": [
+    {
+      "Latency": 25000000,
+      "ThroughputMBps": 30,
+      "MemoryMB": 1.6,
+      "AllocsPerOp": 250,
+      "ChunksProduced": 100
+    },
+    {
+      "Latency": 50000000,
+      "ThroughputMBps": 150,
+      "MemoryMB": 4,
+      "AllocsPerOp": 1000,
+      "ChunksProduced": 100
+    }
+  ],
+  "summary": {
+    "total_tests": 7,
+    "passed_tests": 6,
+    "failed_tests": 0,
+    "skipped_tests": 1,
+    "total_duration": 34292,
+    "average_throughput_mbps": 97.14285714285714,
+    "peak_memory_usage_mb": 30,
+    "baselines_passed": 2,
+    "baselines_failed": 0
+  },
+  "recommendations": [
+    {
+      "category": "Concurrency",
+      "priority": "MEDIUM",
+      "description": "Multi-core system not fully utilized",
+      "impact": "Not leveraging available CPU resources",
+      "action": "Increase worker pool size or enable parallel processing"
+    }
+  ]
+}

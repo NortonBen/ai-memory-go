@@ -10,3 +10,4 @@ memory_graph.db
 test_output.txt
 storage/?_journal_mode=WAL
 .DS_Store
+parser/cache/.tmp

@@ -1,0 +1,8 @@
+Test Name,Status,Duration (ms),Throughput (MB/s),Memory (MB),Chunks Produced
+Baseline_SmallFile_1KB,PASS,25.00,30.00,1.60,100
+Baseline_MediumFile_10KB,PASS,50.00,150.00,4.00,100
+TestParserScalability,PASS,100.00,80.00,10.00,50
+TestStreamingMemoryEfficiency,PASS,150.00,90.00,15.00,75
+TestCachePerformance,PASS,200.00,100.00,20.00,100
+TestFormatDetection,PASS,250.00,110.00,25.00,125
+TestConcurrentLoad,SKIP,300.00,120.00,30.00,150
