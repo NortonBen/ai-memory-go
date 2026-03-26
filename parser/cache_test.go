@@ -9,20 +9,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestInMemoryParsingCache_BasicOperations(t *testing.T) {
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	defer cache.Close()
 
 	ctx := context.Background()
 
 	// Test Set and Get
-	chunks := []Chunk{
-		{ID: "1", Content: "Test content 1", Type: ChunkTypeText},
-		{ID: "2", Content: "Test content 2", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Test content 1", Type: schema.ChunkTypeText},
+		{ID: "2", Content: "Test content 2", Type: schema.ChunkTypeText},
 	}
 
 	err := cache.Set(ctx, "test-key", chunks, map[string]interface{}{"test": "metadata"})
@@ -40,7 +41,7 @@ func TestInMemoryParsingCache_BasicOperations(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_FileOperations(t *testing.T) {
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	defer cache.Close()
 
 	ctx := context.Background()
@@ -51,8 +52,8 @@ func TestInMemoryParsingCache_FileOperations(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
-	chunks := []Chunk{
-		{ID: "1", Content: "Test file content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Test file content", Type: schema.ChunkTypeText},
 	}
 
 	// Test SetByFile and GetByFile
@@ -66,15 +67,15 @@ func TestInMemoryParsingCache_FileOperations(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_TTLExpiration(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.TTL = 100 * time.Millisecond
 	cache := NewInMemoryParsingCache(config)
 	defer cache.Close()
 
 	ctx := context.Background()
 
-	chunks := []Chunk{
-		{ID: "1", Content: "Test content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Test content", Type: schema.ChunkTypeText},
 	}
 
 	// Set entry
@@ -94,7 +95,7 @@ func TestInMemoryParsingCache_TTLExpiration(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_FileModificationTime(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.CheckFileModTime = true
 	cache := NewInMemoryParsingCache(config)
 	defer cache.Close()
@@ -107,8 +108,8 @@ func TestInMemoryParsingCache_FileModificationTime(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("original content"), 0644)
 	require.NoError(t, err)
 
-	chunks := []Chunk{
-		{ID: "1", Content: "Original content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Original content", Type: schema.ChunkTypeText},
 	}
 
 	// Cache the file
@@ -130,7 +131,7 @@ func TestInMemoryParsingCache_FileModificationTime(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_LRUEviction(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.MaxSize = 2
 	config.Policy = PolicyLRU
 	config.CleanupInterval = 0 // Disable automatic cleanup to avoid deadlock
@@ -140,9 +141,9 @@ func TestInMemoryParsingCache_LRUEviction(t *testing.T) {
 	ctx := context.Background()
 
 	// Add entries up to max size
-	chunks1 := []Chunk{{ID: "1", Content: "Content 1", Type: ChunkTypeText}}
-	chunks2 := []Chunk{{ID: "2", Content: "Content 2", Type: ChunkTypeText}}
-	chunks3 := []Chunk{{ID: "3", Content: "Content 3", Type: ChunkTypeText}}
+	chunks1 := []*schema.Chunk{{ID: "1", Content: "Content 1", Type: schema.ChunkTypeText}}
+	chunks2 := []*schema.Chunk{{ID: "2", Content: "Content 2", Type: schema.ChunkTypeText}}
+	chunks3 := []*schema.Chunk{{ID: "3", Content: "Content 3", Type: schema.ChunkTypeText}}
 
 	err := cache.Set(ctx, "key1", chunks1, nil)
 	require.NoError(t, err)
@@ -172,7 +173,7 @@ func TestInMemoryParsingCache_LRUEviction(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_MemoryLimit(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.MaxMemoryMB = 1 // 1MB limit
 	config.Policy = PolicyLRU
 	config.CleanupInterval = 0 // Disable automatic cleanup
@@ -187,9 +188,9 @@ func TestInMemoryParsingCache_MemoryLimit(t *testing.T) {
 		largeContent[i] = 'A'
 	}
 
-	chunks1 := []Chunk{{ID: "1", Content: string(largeContent), Type: ChunkTypeText}}
-	chunks2 := []Chunk{{ID: "2", Content: string(largeContent), Type: ChunkTypeText}}
-	chunks3 := []Chunk{{ID: "3", Content: string(largeContent), Type: ChunkTypeText}}
+	chunks1 := []*schema.Chunk{{ID: "1", Content: string(largeContent), Type: schema.ChunkTypeText}}
+	chunks2 := []*schema.Chunk{{ID: "2", Content: string(largeContent), Type: schema.ChunkTypeText}}
+	chunks3 := []*schema.Chunk{{ID: "3", Content: string(largeContent), Type: schema.ChunkTypeText}}
 
 	// Add first chunk
 	err := cache.Set(ctx, "key1", chunks1, nil)
@@ -209,14 +210,14 @@ func TestInMemoryParsingCache_MemoryLimit(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_Metrics(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.EnableMetrics = true
 	cache := NewInMemoryParsingCache(config)
 	defer cache.Close()
 
 	ctx := context.Background()
 
-	chunks := []Chunk{{ID: "1", Content: "Test content", Type: ChunkTypeText}}
+	chunks := []*schema.Chunk{{ID: "1", Content: "Test content", Type: schema.ChunkTypeText}}
 
 	// Set entry
 	err := cache.Set(ctx, "test-key", chunks, nil)
@@ -240,7 +241,7 @@ func TestInMemoryParsingCache_Metrics(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_Cleanup(t *testing.T) {
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.TTL = 50 * time.Millisecond
 	config.CleanupInterval = 0 // Disable automatic cleanup
 	cache := NewInMemoryParsingCache(config)
@@ -248,7 +249,7 @@ func TestInMemoryParsingCache_Cleanup(t *testing.T) {
 
 	ctx := context.Background()
 
-	chunks := []Chunk{{ID: "1", Content: "Test content", Type: ChunkTypeText}}
+	chunks := []*schema.Chunk{{ID: "1", Content: "Test content", Type: schema.ChunkTypeText}}
 
 	// Set entry
 	err := cache.Set(ctx, "test-key", chunks, nil)
@@ -270,14 +271,14 @@ func TestInMemoryParsingCache_Cleanup(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_Clear(t *testing.T) {
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	defer cache.Close()
 
 	ctx := context.Background()
 
 	// Add multiple entries
 	for i := 0; i < 5; i++ {
-		chunks := []Chunk{{ID: string(rune('1' + i)), Content: "Content", Type: ChunkTypeText}}
+		chunks := []*schema.Chunk{{ID: string(rune('1' + i)), Content: "Content", Type: schema.ChunkTypeText}}
 		err := cache.Set(ctx, string(rune('a'+i)), chunks, nil)
 		require.NoError(t, err)
 	}
@@ -297,11 +298,11 @@ func TestInMemoryParsingCache_Clear(t *testing.T) {
 }
 
 func TestInMemoryParsingCache_ConcurrentAccess(t *testing.T) {
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{{ID: "1", Content: "Test content", Type: ChunkTypeText}}
+	chunks := []*schema.Chunk{{ID: "1", Content: "Test content", Type: schema.ChunkTypeText}}
 
 	// Test concurrent reads and writes
 	done := make(chan bool, 10)
@@ -337,7 +338,7 @@ func TestInMemoryParsingCache_ConcurrentAccess(t *testing.T) {
 func TestCachedParser_Integration(t *testing.T) {
 	// Create a mock parser
 	mockParser := &MockParser{}
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	cachedParser := NewCachedParser(mockParser, cache)
 	defer cachedParser.Close()
 
@@ -369,7 +370,7 @@ func TestCachedParser_FileOperations(t *testing.T) {
 	require.NoError(t, err)
 
 	mockParser := &MockParser{}
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	cachedParser := NewCachedParser(mockParser, cache)
 	defer cachedParser.Close()
 
@@ -407,36 +408,36 @@ type MockParser struct {
 	ParsePDFCallCount      int
 }
 
-func (mp *MockParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (mp *MockParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	mp.ParseFileCallCount++
-	return []Chunk{
-		{ID: "mock-1", Content: "Mock file content", Type: ChunkTypeText, Source: filePath},
+	return []*schema.Chunk{
+		{ID: "mock-1", Content: "Mock file content", Type: schema.ChunkTypeText, Source: filePath},
 	}, nil
 }
 
-func (mp *MockParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (mp *MockParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	mp.ParseTextCallCount++
-	return []Chunk{
-		{ID: "mock-1", Content: content, Type: ChunkTypeText},
+	return []*schema.Chunk{
+		{ID: "mock-1", Content: content, Type: schema.ChunkTypeText},
 	}, nil
 }
 
-func (mp *MockParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (mp *MockParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	mp.ParseMarkdownCallCount++
-	return []Chunk{
-		{ID: "mock-1", Content: content, Type: ChunkTypeMarkdown},
+	return []*schema.Chunk{
+		{ID: "mock-1", Content: content, Type: schema.ChunkTypeMarkdown},
 	}, nil
 }
 
-func (mp *MockParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
+func (mp *MockParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	mp.ParsePDFCallCount++
-	return []Chunk{
-		{ID: "mock-1", Content: "Mock PDF content", Type: ChunkTypePDF, Source: filePath},
+	return []*schema.Chunk{
+		{ID: "mock-1", Content: "Mock PDF content", Type: schema.ChunkTypePDF, Source: filePath},
 	}, nil
 }
 
-func (mp *MockParser) DetectContentType(content string) ChunkType {
-	return ChunkTypeText
+func (mp *MockParser) DetectContentType(content string) schema.ChunkType {
+	return schema.ChunkTypeText
 }
 
 func TestCachedUnifiedParser_BatchOperations(t *testing.T) {
@@ -452,9 +453,9 @@ func TestCachedUnifiedParser_BatchOperations(t *testing.T) {
 		files[i] = filePath
 	}
 
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	config.MinSize = 10 // Lower minimum size for testing
-	cacheConfig := DefaultCacheConfig()
+	cacheConfig := schema.DefaultCacheConfig()
 	cachedParser := NewCachedUnifiedParser(config, cacheConfig)
 	defer cachedParser.Close()
 
@@ -478,7 +479,7 @@ func TestCachedUnifiedParser_BatchOperations(t *testing.T) {
 
 func TestCacheConfig_Validation(t *testing.T) {
 	// Test default config
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	assert.Equal(t, 1000, config.MaxSize)
 	assert.Equal(t, int64(100), config.MaxMemoryMB)
 	assert.Equal(t, 24*time.Hour, config.TTL)

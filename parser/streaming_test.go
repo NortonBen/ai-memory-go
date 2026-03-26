@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,8 +36,8 @@ func TestStreamingParserWithCustomConfig(t *testing.T) {
 		MinChunkSize: 128,
 	}
 
-	chunkConfig := &ChunkingConfig{
-		Strategy: StrategySentence,
+	chunkConfig := &schema.ChunkingConfig{
+		Strategy: schema.StrategySentence,
 		MaxSize:  500,
 		MinSize:  50,
 	}
@@ -45,7 +46,7 @@ func TestStreamingParserWithCustomConfig(t *testing.T) {
 
 	assert.Equal(t, 32*1024, parser.config.BufferSize)
 	assert.Equal(t, 512, parser.config.ChunkOverlap)
-	assert.Equal(t, StrategySentence, parser.chunkingConf.Strategy)
+	assert.Equal(t, schema.StrategySentence, parser.chunkingConf.Strategy)
 }
 
 func TestParseReaderStream(t *testing.T) {
@@ -153,16 +154,16 @@ Third paragraph content. Final sentence of third paragraph.`
 
 	testCases := []struct {
 		name     string
-		strategy ChunkingStrategy
+		strategy schema.ChunkingStrategy
 	}{
-		{"Paragraph", StrategyParagraph},
-		{"Sentence", StrategySentence},
-		{"FixedSize", StrategyFixedSize},
+		{"Paragraph", schema.StrategyParagraph},
+		{"Sentence", schema.StrategySentence},
+		{"FixedSize", schema.StrategyFixedSize},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			chunkConfig := &ChunkingConfig{
+			chunkConfig := &schema.ChunkingConfig{
 				Strategy: tc.strategy,
 				MaxSize:  500, // Increased to ensure chunks are created
 				MinSize:  10,  // Reduced to allow smaller chunks
@@ -388,7 +389,7 @@ func BenchmarkStreamingVsRegularParsing(b *testing.B) {
 	})
 
 	b.Run("Regular", func(b *testing.B) {
-		parser := NewTextParser(DefaultChunkingConfig())
+		parser := NewTextParser(schema.DefaultChunkingConfig())
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, err := parser.ParseText(context.Background(), content)

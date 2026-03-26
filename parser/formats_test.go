@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ func TestFormatParser_ParseTXT(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Parse the file
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	chunks, err := parser.ParseTXT(context.Background(), txtFile)
 	
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestFormatParser_ParseCSV(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Parse the file
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	chunks, err := parser.ParseCSV(context.Background(), csvFile)
 	
 	require.NoError(t, err)
@@ -84,7 +85,7 @@ func TestFormatParser_ParseJSON_Array(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Parse the file
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	chunks, err := parser.ParseJSON(context.Background(), jsonFile)
 	
 	require.NoError(t, err)
@@ -114,7 +115,7 @@ func TestFormatParser_ParseJSON_Object(t *testing.T) {
 	require.NoError(t, err)
 	
 	// Parse the file
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	chunks, err := parser.ParseJSON(context.Background(), jsonFile)
 	
 	require.NoError(t, err)
@@ -149,7 +150,7 @@ func TestUnifiedParser_ParseFile(t *testing.T) {
 		{"test.md", "# Header\n\nThis is markdown content with enough text to meet the minimum size requirement for proper chunking.", "markdown"},
 	}
 	
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	
 	for _, tc := range testCases {
 		t.Run(tc.filename, func(t *testing.T) {
@@ -198,7 +199,7 @@ func TestDetectFileFormat(t *testing.T) {
 }
 
 func TestUnifiedParser_GetSupportedFormats(t *testing.T) {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	formats := parser.GetSupportedFormats()
 	
 	expectedFormats := []string{"txt", "text", "csv", "json", "md", "markdown", "pdf"}
@@ -206,7 +207,7 @@ func TestUnifiedParser_GetSupportedFormats(t *testing.T) {
 }
 
 func TestUnifiedParser_IsFormatSupported(t *testing.T) {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	
 	// Supported formats
 	assert.True(t, parser.IsFormatSupported("test.txt"))
@@ -220,7 +221,7 @@ func TestUnifiedParser_IsFormatSupported(t *testing.T) {
 }
 
 func TestFormatParser_looksLikeHeaders(t *testing.T) {
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	
 	// Should be headers
 	assert.True(t, parser.looksLikeHeaders([]string{"Name", "Age", "City"}))
@@ -235,7 +236,7 @@ func TestFormatParser_looksLikeHeaders(t *testing.T) {
 }
 
 func TestFormatParser_isNumeric(t *testing.T) {
-	parser := NewFormatParser(DefaultChunkingConfig())
+	parser := NewFormatParser(schema.DefaultChunkingConfig())
 	
 	// Numeric
 	assert.True(t, parser.isNumeric("123"))

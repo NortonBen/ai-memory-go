@@ -11,9 +11,11 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
+	_ "github.com/NortonBen/ai-memory-go/storage/adapters/sqlite"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -30,7 +32,12 @@ func main() {
 
 	// ─── 1. Gemini Embedder ───────────────────────────────────────────────
 	// Using Google Gemini for embeddings (text-embedding-004)
-	geminiEmb, err := extractor.NewGeminiEmbeddingProvider(geminiApiKey, "gemini-embedding-2-preview")
+	embFactory := registry.NewEmbeddingProviderFactory()
+	geminiEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:   extractor.EmbeddingProviderGemini,
+		APIKey: geminiApiKey,
+		Model:  "text-embedding-004",
+	})
 	must(err, "gemini embedding provider")
 
 	cache := vector.NewInMemoryEmbeddingCache()
@@ -55,8 +62,13 @@ func main() {
 	defer relStore.Close()
 
 	// ─── 3. Gemini Extractor ──────────────────────────────────────────────
-	// Using Google Gemini for extraction (gemini-2.5-flash)
-	geminiProvider, err := extractor.NewGeminiProvider(geminiApiKey, "gemini-2-flash")
+	// Using Google Gemini for extraction (gemini-2-flash)
+	llmFactory := registry.NewProviderFactory()
+	geminiProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:   extractor.ProviderGemini,
+		APIKey: geminiApiKey,
+		Model:  "gemini-2-flash",
+	})
 	must(err, "gemini provider")
 	llmExt := extractor.NewBasicExtractor(geminiProvider, nil)
 

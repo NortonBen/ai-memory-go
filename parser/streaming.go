@@ -10,58 +10,32 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
-// StreamingConfig configures streaming parser behavior
-type StreamingConfig struct {
-	// BufferSize is the size of each read buffer in bytes
-	BufferSize int `json:"buffer_size"`
-
-	// ChunkOverlap is the overlap between chunks in bytes
-	ChunkOverlap int `json:"chunk_overlap"`
-
-	// MaxChunkSize is the maximum size of a single chunk
-	MaxChunkSize int `json:"max_chunk_size"`
-
-	// MinChunkSize is the minimum size of a chunk to be processed
-	MinChunkSize int `json:"min_chunk_size"`
-
-	// ProgressCallback is called periodically with progress updates
-	ProgressCallback func(bytesProcessed, totalBytes int64, chunksCreated int)
-
-	// EnableProgressTracking enables progress tracking for long operations
-	EnableProgressTracking bool `json:"enable_progress_tracking"`
-
-	// FlushInterval determines how often to flush processed chunks
-	FlushInterval time.Duration `json:"flush_interval"`
-}
+// StreamingConfig is an alias for schema.StreamingConfig
+type StreamingConfig = schema.StreamingConfig
 
 // DefaultStreamingConfig returns sensible defaults for streaming parsing
-func DefaultStreamingConfig() *StreamingConfig {
-	return &StreamingConfig{
-		BufferSize:             64 * 1024, // 64KB buffer
-		ChunkOverlap:           1024,      // 1KB overlap
-		MaxChunkSize:           4 * 1024,  // 4KB max chunk
-		MinChunkSize:           256,       // 256B min chunk
-		EnableProgressTracking: true,
-		FlushInterval:          100 * time.Millisecond,
-	}
+func DefaultStreamingConfig() *schema.StreamingConfig {
+	return schema.DefaultStreamingConfig()
 }
 
 // StreamingParser handles memory-efficient parsing of large files
 type StreamingParser struct {
-	config       *StreamingConfig
-	chunkingConf *ChunkingConfig
+	config       *schema.StreamingConfig
+	chunkingConf *schema.ChunkingConfig
 	mu           sync.RWMutex
 }
 
 // NewStreamingParser creates a new streaming parser
-func NewStreamingParser(streamConfig *StreamingConfig, chunkConfig *ChunkingConfig) *StreamingParser {
+func NewStreamingParser(streamConfig *schema.StreamingConfig, chunkConfig *schema.ChunkingConfig) *StreamingParser {
 	if streamConfig == nil {
-		streamConfig = DefaultStreamingConfig()
+		streamConfig = schema.DefaultStreamingConfig()
 	}
 	if chunkConfig == nil {
-		chunkConfig = DefaultChunkingConfig()
+		chunkConfig = schema.DefaultChunkingConfig()
 	}
 
 	return &StreamingParser{
@@ -70,17 +44,11 @@ func NewStreamingParser(streamConfig *StreamingConfig, chunkConfig *ChunkingConf
 	}
 }
 
-// StreamingResult represents the result of streaming parsing
-type StreamingResult struct {
-	Chunks          []Chunk
-	TotalBytes      int64
-	ProcessingTime  time.Duration
-	ChunksCreated   int
-	MemoryPeakUsage int64
-}
+// StreamingResult is an alias for schema.StreamingResult
+type StreamingResult = schema.StreamingResult
 
 // ParseFileStream parses a large file using streaming approach
-func (sp *StreamingParser) ParseFileStream(ctx context.Context, filePath string) (*StreamingResult, error) {
+func (sp *StreamingParser) ParseFileStream(ctx context.Context, filePath string) (*schema.StreamingResult, error) {
 	startTime := time.Now()
 
 	// Open file for reading
@@ -101,8 +69,8 @@ func (sp *StreamingParser) ParseFileStream(ctx context.Context, filePath string)
 	reader := bufio.NewReaderSize(file, sp.config.BufferSize)
 
 	// Initialize result
-	result := &StreamingResult{
-		Chunks:     make([]Chunk, 0),
+	result := &schema.StreamingResult{
+		Chunks:     make([]*schema.Chunk, 0),
 		TotalBytes: totalBytes,
 	}
 
@@ -120,7 +88,7 @@ func (sp *StreamingParser) ParseFileStream(ctx context.Context, filePath string)
 }
 
 // ParseReaderStream parses content from any io.Reader using streaming
-func (sp *StreamingParser) ParseReaderStream(ctx context.Context, reader io.Reader, source string) (*StreamingResult, error) {
+func (sp *StreamingParser) ParseReaderStream(ctx context.Context, reader io.Reader, source string) (*schema.StreamingResult, error) {
 	startTime := time.Now()
 
 	// Wrap in buffered reader if not already
@@ -137,7 +105,7 @@ func (sp *StreamingParser) ParseReaderStream(ctx context.Context, reader io.Read
 		return nil, fmt.Errorf("streaming process failed: %w", err)
 	}
 
-	return &StreamingResult{
+	return &schema.StreamingResult{
 		Chunks:         chunks,
 		ChunksCreated:  len(chunks),
 		ProcessingTime: time.Since(startTime),
@@ -146,8 +114,8 @@ func (sp *StreamingParser) ParseReaderStream(ctx context.Context, reader io.Read
 }
 
 // streamProcess performs the core streaming processing logic
-func (sp *StreamingParser) streamProcess(ctx context.Context, reader *bufio.Reader, source string, totalBytes int64) ([]Chunk, error) {
-	var chunks []Chunk
+func (sp *StreamingParser) streamProcess(ctx context.Context, reader *bufio.Reader, source string, totalBytes int64) ([]*schema.Chunk, error) {
+	var chunks []*schema.Chunk
 	var buffer strings.Builder
 	var bytesProcessed int64
 	var overlap string
@@ -226,21 +194,21 @@ func (sp *StreamingParser) streamProcess(ctx context.Context, reader *bufio.Read
 }
 
 // processBuffer processes a buffer of text into chunks with overlap handling
-func (sp *StreamingParser) processBuffer(content, source string) ([]Chunk, string) {
+func (sp *StreamingParser) processBuffer(content, source string) ([]*schema.Chunk, string) {
 	if len(content) < sp.config.MinChunkSize {
 		return nil, content // Return as overlap for next buffer
 	}
 
-	var chunks []Chunk
+	var chunks []*schema.Chunk
 	var overlap string
 
 	// Split content based on chunking strategy
 	switch sp.chunkingConf.Strategy {
-	case StrategyParagraph:
+	case schema.StrategyParagraph:
 		chunks, overlap = sp.chunkBufferByParagraph(content, source)
-	case StrategySentence:
+	case schema.StrategySentence:
 		chunks, overlap = sp.chunkBufferBySentence(content, source)
-	case StrategyFixedSize:
+	case schema.StrategyFixedSize:
 		chunks, overlap = sp.chunkBufferByFixedSize(content, source)
 	default:
 		chunks, overlap = sp.chunkBufferByParagraph(content, source)
@@ -250,21 +218,21 @@ func (sp *StreamingParser) processBuffer(content, source string) ([]Chunk, strin
 }
 
 // processBufferFinal processes final buffer content, creating chunks even if below min size
-func (sp *StreamingParser) processBufferFinal(content, source string) []Chunk {
+func (sp *StreamingParser) processBufferFinal(content, source string) []*schema.Chunk {
 	if len(content) == 0 {
 		return nil
 	}
 
 	// For final processing, create chunk even if below min size
-	var chunks []Chunk
+	var chunks []*schema.Chunk
 
 	// Split content based on chunking strategy
 	switch sp.chunkingConf.Strategy {
-	case StrategyParagraph:
+	case schema.StrategyParagraph:
 		chunks, _ = sp.chunkBufferByParagraph(content, source)
-	case StrategySentence:
+	case schema.StrategySentence:
 		chunks, _ = sp.chunkBufferBySentence(content, source)
-	case StrategyFixedSize:
+	case schema.StrategyFixedSize:
 		chunks, _ = sp.chunkBufferByFixedSize(content, source)
 	default:
 		chunks, _ = sp.chunkBufferByParagraph(content, source)
@@ -272,17 +240,17 @@ func (sp *StreamingParser) processBufferFinal(content, source string) []Chunk {
 
 	// If no chunks were created but we have content, create a single chunk
 	if len(chunks) == 0 && len(content) > 0 {
-		chunk := NewChunk(content, source, ChunkTypeText)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(content, source, schema.ChunkTypeText)
+		chunks = append(chunks, chunk)
 	}
 
 	return chunks
 }
 
 // chunkBufferByParagraph splits buffer content by paragraphs with streaming overlap
-func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]Chunk, string) {
+func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]*schema.Chunk, string) {
 	paragraphs := strings.Split(content, "\n\n")
-	var chunks []Chunk
+	var chunks []*schema.Chunk
 	var currentChunk strings.Builder
 
 	// Process all but the last paragraph (which might be incomplete)
@@ -296,8 +264,8 @@ func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]Chu
 		if currentChunk.Len()+len(para) > sp.config.MaxChunkSize && currentChunk.Len() > 0 {
 			// Create chunk from current content
 			if currentChunk.Len() >= sp.config.MinChunkSize {
-				chunk := NewChunk(currentChunk.String(), source, ChunkTypeParagraph)
-				chunks = append(chunks, *chunk)
+				chunk := NewChunk(currentChunk.String(), source, schema.ChunkTypeParagraph)
+				chunks = append(chunks, chunk)
 			}
 			currentChunk.Reset()
 		}
@@ -322,8 +290,8 @@ func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]Chu
 			} else {
 				// Last paragraph is too big, save current chunk and use last para as overlap
 				if currentChunk.Len() >= sp.config.MinChunkSize {
-					chunk := NewChunk(currentChunk.String(), source, ChunkTypeParagraph)
-					chunks = append(chunks, *chunk)
+					chunk := NewChunk(currentChunk.String(), source, schema.ChunkTypeParagraph)
+					chunks = append(chunks, chunk)
 				}
 				overlap = lastPara
 			}
@@ -332,8 +300,8 @@ func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]Chu
 
 	// Create final chunk if we have content
 	if currentChunk.Len() >= sp.config.MinChunkSize && overlap == "" {
-		chunk := NewChunk(currentChunk.String(), source, ChunkTypeParagraph)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(currentChunk.String(), source, schema.ChunkTypeParagraph)
+		chunks = append(chunks, chunk)
 	} else if overlap == "" && currentChunk.Len() > 0 {
 		// Save remaining content as overlap
 		overlap = currentChunk.String()
@@ -343,13 +311,13 @@ func (sp *StreamingParser) chunkBufferByParagraph(content, source string) ([]Chu
 }
 
 // chunkBufferBySentence splits buffer content by sentences with streaming overlap
-func (sp *StreamingParser) chunkBufferBySentence(content, source string) ([]Chunk, string) {
+func (sp *StreamingParser) chunkBufferBySentence(content, source string) ([]*schema.Chunk, string) {
 	// Simple sentence splitting - can be enhanced with NLP
 	sentences := strings.FieldsFunc(content, func(r rune) bool {
 		return r == '.' || r == '!' || r == '?'
 	})
 
-	var chunks []Chunk
+	var chunks []*schema.Chunk
 	var currentChunk strings.Builder
 
 	// Process all but the last sentence (which might be incomplete)
@@ -365,10 +333,8 @@ func (sp *StreamingParser) chunkBufferBySentence(content, source string) ([]Chun
 		// Check if adding this sentence exceeds max size
 		if currentChunk.Len()+len(sentence) > sp.config.MaxChunkSize && currentChunk.Len() > 0 {
 			// Create chunk from current content
-			if currentChunk.Len() >= sp.config.MinChunkSize {
-				chunk := NewChunk(currentChunk.String(), source, ChunkTypeSentence)
-				chunks = append(chunks, *chunk)
-			}
+				chunk := NewChunk(currentChunk.String(), source, schema.ChunkTypeSentence)
+				chunks = append(chunks, chunk)
 			currentChunk.Reset()
 		}
 
@@ -390,8 +356,8 @@ func (sp *StreamingParser) chunkBufferBySentence(content, source string) ([]Chun
 
 	// Create final chunk if we have content
 	if currentChunk.Len() >= sp.config.MinChunkSize {
-		chunk := NewChunk(currentChunk.String(), source, ChunkTypeSentence)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(currentChunk.String(), source, schema.ChunkTypeSentence)
+		chunks = append(chunks, chunk)
 	} else if currentChunk.Len() > 0 {
 		// Combine with overlap
 		if overlap != "" {
@@ -405,8 +371,8 @@ func (sp *StreamingParser) chunkBufferBySentence(content, source string) ([]Chun
 }
 
 // chunkBufferByFixedSize splits buffer content by fixed size with streaming overlap
-func (sp *StreamingParser) chunkBufferByFixedSize(content, source string) ([]Chunk, string) {
-	var chunks []Chunk
+func (sp *StreamingParser) chunkBufferByFixedSize(content, source string) ([]*schema.Chunk, string) {
+	var chunks []*schema.Chunk
 	contentRunes := []rune(content)
 
 	// Process content in fixed-size chunks, leaving some for overlap
@@ -420,8 +386,8 @@ func (sp *StreamingParser) chunkBufferByFixedSize(content, source string) ([]Chu
 		chunkContent = strings.TrimSpace(chunkContent)
 
 		if len(chunkContent) >= sp.config.MinChunkSize {
-			chunk := NewChunk(chunkContent, source, ChunkTypeText)
-			chunks = append(chunks, *chunk)
+			chunk := NewChunk(chunkContent, source, schema.ChunkTypeText)
+			chunks = append(chunks, chunk)
 		}
 
 		// If we've processed most of the content, save remainder as overlap
@@ -443,12 +409,14 @@ func (sp *StreamingParser) chunkBufferByFixedSize(content, source string) ([]Chu
 
 // GetMemoryUsage returns current memory usage estimate
 func (sp *StreamingParser) GetMemoryUsage() int64 {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
 	// Estimate based on buffer sizes
 	return int64(sp.config.BufferSize + sp.config.MaxChunkSize + sp.config.ChunkOverlap)
 }
 
 // UpdateConfig updates the streaming configuration
-func (sp *StreamingParser) UpdateConfig(config *StreamingConfig) {
+func (sp *StreamingParser) UpdateConfig(config *schema.StreamingConfig) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 
@@ -458,18 +426,11 @@ func (sp *StreamingParser) UpdateConfig(config *StreamingConfig) {
 }
 
 // GetConfig returns a copy of the current configuration
-func (sp *StreamingParser) GetConfig() *StreamingConfig {
+func (sp *StreamingParser) GetConfig() *schema.StreamingConfig {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 
 	// Return a copy to prevent external modification
-	return &StreamingConfig{
-		BufferSize:             sp.config.BufferSize,
-		ChunkOverlap:           sp.config.ChunkOverlap,
-		MaxChunkSize:           sp.config.MaxChunkSize,
-		MinChunkSize:           sp.config.MinChunkSize,
-		ProgressCallback:       sp.config.ProgressCallback,
-		EnableProgressTracking: sp.config.EnableProgressTracking,
-		FlushInterval:          sp.config.FlushInterval,
-	}
+	conf := *sp.config
+	return &conf
 }

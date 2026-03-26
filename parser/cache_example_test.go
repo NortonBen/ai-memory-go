@@ -7,20 +7,22 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // Example_basicCaching demonstrates basic caching operations
 func Example_basicCaching() {
 	// Create a cache with default configuration
-	cache := NewInMemoryParsingCache(DefaultCacheConfig())
+	cache := NewInMemoryParsingCache(schema.DefaultCacheConfig())
 	defer cache.Close()
 
 	ctx := context.Background()
 
 	// Create some test chunks
-	chunks := []Chunk{
-		{ID: "1", Content: "Hello, world!", Type: ChunkTypeText},
-		{ID: "2", Content: "This is cached content.", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Hello, world!", Type: schema.ChunkTypeText},
+		{ID: "2", Content: "This is cached content.", Type: schema.ChunkTypeText},
 	}
 
 	// Store chunks in cache
@@ -56,12 +58,11 @@ func Example_basicCaching() {
 // Example_cachedParser demonstrates using cached parser wrapper
 func Example_cachedParser() {
 	// Create a unified parser
-	config := DefaultChunkingConfig()
-	unifiedParser := NewUnifiedParser(config)
+	unifiedParser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer unifiedParser.Close()
 
 	// Wrap it with caching
-	cacheConfig := DefaultCacheConfig()
+	cacheConfig := schema.DefaultCacheConfig()
 	cacheConfig.TTL = 1 * time.Hour // Cache for 1 hour
 	cachedParser := NewCachedParserWithConfig(unifiedParser, cacheConfig)
 	defer cachedParser.Close()
@@ -117,8 +118,8 @@ func Example_fileCaching() {
 	defer os.Remove(testFile)
 
 	// Create cached parser with file modification checking enabled
-	config := DefaultChunkingConfig()
-	cacheConfig := DefaultCacheConfig()
+	config := schema.DefaultChunkingConfig()
+	cacheConfig := schema.DefaultCacheConfig()
 	cacheConfig.CheckFileModTime = true
 	cachedParser := NewCachedUnifiedParser(config, cacheConfig)
 	defer cachedParser.Close()
@@ -186,9 +187,8 @@ func Example_batchCaching() {
 	}
 
 	// Create cached parser
-	config := DefaultChunkingConfig()
-	cacheConfig := DefaultCacheConfig()
-	cachedParser := NewCachedUnifiedParser(config, cacheConfig)
+	config := schema.DefaultChunkingConfig()
+	cachedParser := NewCachedUnifiedParser(config, schema.DefaultCacheConfig())
 	defer cachedParser.Close()
 
 	ctx := context.Background()
@@ -247,9 +247,9 @@ func Example_cacheEviction() {
 	ctx := context.Background()
 
 	// Create test chunks
-	chunks1 := []Chunk{{ID: "1", Content: "First content", Type: ChunkTypeText}}
-	chunks2 := []Chunk{{ID: "2", Content: "Second content", Type: ChunkTypeText}}
-	chunks3 := []Chunk{{ID: "3", Content: "Third content", Type: ChunkTypeText}}
+	chunks1 := []*schema.Chunk{{ID: "1", Content: "First content", Type: schema.ChunkTypeText}}
+	chunks2 := []*schema.Chunk{{ID: "2", Content: "Second content", Type: schema.ChunkTypeText}}
+	chunks3 := []*schema.Chunk{{ID: "3", Content: "Third content", Type: schema.ChunkTypeText}}
 
 	// Add first entry
 	cache.Set(ctx, "key1", chunks1, nil)
@@ -298,7 +298,7 @@ func Example_cacheMetrics() {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{{ID: "1", Content: "Metrics test content", Type: ChunkTypeText}}
+	chunks := []*schema.Chunk{{ID: "1", Content: "Metrics test content", Type: schema.ChunkTypeText}}
 
 	// Perform various cache operations
 	cache.Set(ctx, "key1", chunks, nil)
@@ -354,9 +354,8 @@ func Example_cacheWarmup() {
 	}
 
 	// Create cached parser
-	config := DefaultChunkingConfig()
-	cacheConfig := DefaultCacheConfig()
-	cachedParser := NewCachedUnifiedParser(config, cacheConfig)
+	config := schema.DefaultChunkingConfig()
+	cachedParser := NewCachedUnifiedParser(config, schema.DefaultCacheConfig())
 	defer cachedParser.Close()
 
 	ctx := context.Background()

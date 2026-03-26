@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // BenchmarkAllParserTypes benchmarks all parser implementations
@@ -21,7 +23,7 @@ func BenchmarkAllParserTypes(b *testing.B) {
 
 	// Test each parser type
 	b.Run("UnifiedParser", func(b *testing.B) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		b.ResetTimer()
@@ -37,7 +39,7 @@ func BenchmarkAllParserTypes(b *testing.B) {
 	})
 
 	b.Run("CachedParser", func(b *testing.B) {
-		parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+		parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), DefaultCacheConfig())
 		defer parser.Close()
 
 		b.ResetTimer()
@@ -53,7 +55,7 @@ func BenchmarkAllParserTypes(b *testing.B) {
 	})
 
 	b.Run("StreamingParser", func(b *testing.B) {
-		parser := NewStreamingParser(DefaultStreamingConfig(), DefaultChunkingConfig())
+		parser := NewStreamingParser(DefaultStreamingConfig(), schema.DefaultChunkingConfig())
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -93,7 +95,7 @@ func BenchmarkFileSizeScaling(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			b.SetBytes(int64(len(content)))
@@ -127,7 +129,7 @@ func BenchmarkConcurrentParsing(b *testing.B) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			b.ResetTimer()
@@ -159,7 +161,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(tc.name, func(b *testing.B) {
 			testFiles := createComprehensiveBenchmarkTestFiles(b, tempDir, tc.fileCount, tc.fileSize)
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			var m1, m2 runtime.MemStats
@@ -203,7 +205,7 @@ func BenchmarkCachePerformance(b *testing.B) {
 
 	for _, hr := range hitRates {
 		b.Run(hr.name, func(b *testing.B) {
-			parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+			parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), DefaultCacheConfig())
 			defer parser.Close()
 
 			// Pre-populate cache
@@ -249,7 +251,7 @@ func BenchmarkStreamingMemoryEfficiency(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			parser := NewStreamingParser(DefaultStreamingConfig(), DefaultChunkingConfig())
+			parser := NewStreamingParser(DefaultStreamingConfig(), schema.DefaultChunkingConfig())
 
 			var m1, m2 runtime.MemStats
 			runtime.GC()
@@ -294,7 +296,7 @@ func BenchmarkWorkerPoolScalingComprehensive(b *testing.B) {
 				RetryDelay:    50 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			b.ResetTimer()
@@ -351,7 +353,7 @@ func BenchmarkThroughputMeasurement(b *testing.B) {
 				totalBytes += len(content)
 			}
 
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			b.SetBytes(int64(totalBytes))
@@ -391,7 +393,7 @@ func BenchmarkLatencyMeasurement(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			latencies := make([]time.Duration, b.N)
@@ -439,12 +441,12 @@ func BenchmarkConfigurationComparison(b *testing.B) {
 
 	configs := []struct {
 		name   string
-		config *ChunkingConfig
+		config *schema.ChunkingConfig
 	}{
 		{
 			"Paragraph_Small",
-			&ChunkingConfig{
-				Strategy: StrategyParagraph,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyParagraph,
 				MaxSize:  500,
 				MinSize:  50,
 				Overlap:  50,
@@ -452,8 +454,8 @@ func BenchmarkConfigurationComparison(b *testing.B) {
 		},
 		{
 			"Paragraph_Large",
-			&ChunkingConfig{
-				Strategy: StrategyParagraph,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyParagraph,
 				MaxSize:  2000,
 				MinSize:  100,
 				Overlap:  200,
@@ -461,8 +463,8 @@ func BenchmarkConfigurationComparison(b *testing.B) {
 		},
 		{
 			"Sentence",
-			&ChunkingConfig{
-				Strategy: StrategySentence,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategySentence,
 				MaxSize:  1000,
 				MinSize:  50,
 				Overlap:  100,
@@ -470,8 +472,8 @@ func BenchmarkConfigurationComparison(b *testing.B) {
 		},
 		{
 			"FixedSize",
-			&ChunkingConfig{
-				Strategy: StrategyFixedSize,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyFixedSize,
 				MaxSize:  1000,
 				MinSize:  100,
 				Overlap:  100,

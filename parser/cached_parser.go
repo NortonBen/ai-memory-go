@@ -5,13 +5,15 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // CachedParser wraps any Parser implementation with intelligent caching
 type CachedParser struct {
 	parser Parser
 	cache  ParsingCache
-	config *CacheConfig
+	config *schema.CacheConfig
 }
 
 // NewCachedParser creates a new cached parser wrapper
@@ -19,12 +21,12 @@ func NewCachedParser(parser Parser, cache ParsingCache) *CachedParser {
 	return &CachedParser{
 		parser: parser,
 		cache:  cache,
-		config: DefaultCacheConfig(),
+		config: schema.DefaultCacheConfig(),
 	}
 }
 
 // NewCachedParserWithConfig creates a cached parser with custom cache configuration
-func NewCachedParserWithConfig(parser Parser, config *CacheConfig) *CachedParser {
+func NewCachedParserWithConfig(parser Parser, config *schema.CacheConfig) *CachedParser {
 	cache := NewInMemoryParsingCache(config)
 	return &CachedParser{
 		parser: parser,
@@ -34,7 +36,7 @@ func NewCachedParserWithConfig(parser Parser, config *CacheConfig) *CachedParser
 }
 
 // ParseFile parses a file with caching support
-func (cp *CachedParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (cp *CachedParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// Try to get from cache first
 	if chunks, found := cp.cache.GetByFile(ctx, filePath); found {
 		return chunks, nil
@@ -63,7 +65,7 @@ func (cp *CachedParser) ParseFile(ctx context.Context, filePath string) ([]Chunk
 }
 
 // ParseText parses text content with caching support
-func (cp *CachedParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (cp *CachedParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	// Generate cache key from content
 	key := cp.generateContentKey(content)
 
@@ -94,7 +96,7 @@ func (cp *CachedParser) ParseText(ctx context.Context, content string) ([]Chunk,
 }
 
 // ParseMarkdown parses markdown content with caching support
-func (cp *CachedParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (cp *CachedParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	// Generate cache key from content with markdown prefix
 	key := cp.generateContentKey("markdown:" + content)
 
@@ -125,7 +127,7 @@ func (cp *CachedParser) ParseMarkdown(ctx context.Context, content string) ([]Ch
 }
 
 // ParsePDF parses PDF files with caching support
-func (cp *CachedParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
+func (cp *CachedParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// Try to get from cache first
 	if chunks, found := cp.cache.GetByFile(ctx, filePath); found {
 		return chunks, nil
@@ -153,7 +155,7 @@ func (cp *CachedParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk,
 }
 
 // DetectContentType delegates to the underlying parser
-func (cp *CachedParser) DetectContentType(content string) ChunkType {
+func (cp *CachedParser) DetectContentType(content string) schema.ChunkType {
 	return cp.parser.DetectContentType(content)
 }
 
@@ -163,7 +165,7 @@ func (cp *CachedParser) GetCache() ParsingCache {
 }
 
 // GetCacheMetrics returns current cache performance metrics
-func (cp *CachedParser) GetCacheMetrics() *CacheMetrics {
+func (cp *CachedParser) GetCacheMetrics() *schema.CacheMetrics {
 	return cp.cache.GetMetrics()
 }
 
@@ -229,7 +231,7 @@ type CachedUnifiedParser struct {
 }
 
 // NewCachedUnifiedParser creates a cached version of UnifiedParser
-func NewCachedUnifiedParser(config *ChunkingConfig, cacheConfig *CacheConfig) *CachedUnifiedParser {
+func NewCachedUnifiedParser(config *schema.ChunkingConfig, cacheConfig *schema.CacheConfig) *CachedUnifiedParser {
 	unifiedParser := NewUnifiedParser(config)
 	cachedParser := NewCachedParserWithConfig(unifiedParser, cacheConfig)
 
@@ -240,8 +242,8 @@ func NewCachedUnifiedParser(config *ChunkingConfig, cacheConfig *CacheConfig) *C
 }
 
 // BatchParseFiles parses multiple files with caching and parallel processing
-func (cup *CachedUnifiedParser) BatchParseFiles(ctx context.Context, filePaths []string) (map[string][]Chunk, error) {
-	results := make(map[string][]Chunk)
+func (cup *CachedUnifiedParser) BatchParseFiles(ctx context.Context, filePaths []string) (map[string][]*schema.Chunk, error) {
+	results := make(map[string][]*schema.Chunk)
 	uncachedFiles := make([]string, 0)
 
 	// Check cache for each file first
@@ -305,7 +307,7 @@ func (cup *CachedUnifiedParser) StopWorkerPool() error {
 }
 
 // GetWorkerPoolMetrics returns worker pool metrics
-func (cup *CachedUnifiedParser) GetWorkerPoolMetrics() WorkerPoolMetrics {
+func (cup *CachedUnifiedParser) GetWorkerPoolMetrics() schema.WorkerPoolMetrics {
 	return cup.unifiedParser.GetWorkerPoolMetrics()
 }
 
@@ -315,13 +317,13 @@ func (cup *CachedUnifiedParser) IsWorkerPoolHealthy() bool {
 }
 
 // ParseFileStream parses large files using streaming with caching for chunks
-func (cup *CachedUnifiedParser) ParseFileStream(ctx context.Context, filePath string) (*StreamingResult, error) {
+func (cup *CachedUnifiedParser) ParseFileStream(ctx context.Context, filePath string) (*schema.StreamingResult, error) {
 	// For streaming, we cache the final result but not intermediate chunks
 	// This is because streaming is used for large files where caching might not be beneficial
 
 	// Check if we have a cached result for this file
 	if chunks, found := cup.cache.GetByFile(ctx, filePath); found {
-		return &StreamingResult{
+		return &schema.StreamingResult{
 			Chunks:         chunks,
 			ChunksCreated:  len(chunks),
 			ProcessingTime: 0, // Cached result
@@ -352,11 +354,11 @@ func (cup *CachedUnifiedParser) ParseFileStream(ctx context.Context, filePath st
 }
 
 // UpdateStreamingConfig updates the streaming configuration
-func (cup *CachedUnifiedParser) UpdateStreamingConfig(config *StreamingConfig) {
+func (cup *CachedUnifiedParser) UpdateStreamingConfig(config *schema.StreamingConfig) {
 	cup.unifiedParser.UpdateStreamingConfig(config)
 }
 
 // GetStreamingConfig returns the current streaming configuration
-func (cup *CachedUnifiedParser) GetStreamingConfig() *StreamingConfig {
+func (cup *CachedUnifiedParser) GetStreamingConfig() *schema.StreamingConfig {
 	return cup.unifiedParser.GetStreamingConfig()
 }

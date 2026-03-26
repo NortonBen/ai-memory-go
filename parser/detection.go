@@ -8,17 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // FileTypeDetector provides enhanced file type detection capabilities
 type FileTypeDetector struct {
-	config *ChunkingConfig
+	config *schema.ChunkingConfig
 }
 
 // NewFileTypeDetector creates a new file type detector
-func NewFileTypeDetector(config *ChunkingConfig) *FileTypeDetector {
+func NewFileTypeDetector(config *schema.ChunkingConfig) *FileTypeDetector {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 	return &FileTypeDetector{config: config}
 }
@@ -361,7 +363,7 @@ type FileRouter struct {
 }
 
 // NewFileRouter creates a new file router
-func NewFileRouter(config *RouterConfig, chunkingConfig *ChunkingConfig) *FileRouter {
+func NewFileRouter(config *RouterConfig, chunkingConfig *schema.ChunkingConfig) *FileRouter {
 	if config == nil {
 		config = DefaultRouterConfig()
 	}
@@ -370,9 +372,9 @@ func NewFileRouter(config *RouterConfig, chunkingConfig *ChunkingConfig) *FileRo
 		config:   config,
 		detector: NewFileTypeDetector(chunkingConfig),
 		parsers:  make(map[string]Parser),
-	}
+}
 
-	// Register default parsers
+	// Register default formats
 	router.RegisterParser("txt", NewFormatParser(chunkingConfig))
 	router.RegisterParser("csv", NewFormatParser(chunkingConfig))
 	router.RegisterParser("json", NewFormatParser(chunkingConfig))
@@ -393,7 +395,7 @@ func (fr *FileRouter) RegisterParser(format string, parser Parser) {
 }
 
 // RouteFile determines the appropriate parser and parses the file
-func (fr *FileRouter) RouteFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fr *FileRouter) RouteFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// Check file size
 	stat, err := os.Stat(filePath)
 	if err != nil {
@@ -472,7 +474,7 @@ func (fr *FileRouter) RouteFile(ctx context.Context, filePath string) ([]Chunk, 
 }
 
 // parseWithParser calls the appropriate parser method based on format
-func (fr *FileRouter) parseWithParser(ctx context.Context, parser Parser, filePath string, fileInfo *FileInfo) ([]Chunk, error) {
+func (fr *FileRouter) parseWithParser(ctx context.Context, parser Parser, filePath string, fileInfo *FileInfo) ([]*schema.Chunk, error) {
 	switch fileInfo.Format {
 	case "pdf":
 		if pdfParser, ok := parser.(*PDFParser); ok {

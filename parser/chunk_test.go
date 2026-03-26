@@ -5,17 +5,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewChunk tests the creation of a new chunk
+// Testschema.NewChunk tests the creation of a new chunk
 func TestNewChunk(t *testing.T) {
 	content := "This is test content for a chunk."
 	source := "test_source"
-	chunkType := ChunkTypeText
+	chunkType := schema.ChunkTypeText
 
-	chunk := NewChunk(content, source, chunkType)
+	chunk := schema.NewChunk(content, source, chunkType)
 
 	assert.NotNil(t, chunk)
 	assert.Equal(t, content, chunk.Content)
@@ -33,9 +34,9 @@ func TestChunkIDGeneration(t *testing.T) {
 	content2 := "Content B"
 	source := "test_source"
 
-	chunk1 := NewChunk(content1, source, ChunkTypeText)
-	chunk2 := NewChunk(content1, source, ChunkTypeText)
-	chunk3 := NewChunk(content2, source, ChunkTypeText)
+	chunk1 := schema.NewChunk(content1, source, schema.ChunkTypeText)
+	chunk2 := schema.NewChunk(content1, source, schema.ChunkTypeText)
+	chunk3 := schema.NewChunk(content2, source, schema.ChunkTypeText)
 
 	// Same content and source should produce same ID
 	assert.Equal(t, chunk1.ID, chunk2.ID)
@@ -49,9 +50,9 @@ func TestChunkHashGeneration(t *testing.T) {
 	content := "Test content"
 	source := "test_source"
 
-	chunk1 := NewChunk(content, source, ChunkTypeText)
-	chunk2 := NewChunk(content, source, ChunkTypeText)
-	chunk3 := NewChunk(content+"  ", source, ChunkTypeText) // Extra whitespace
+	chunk1 := schema.NewChunk(content, source, schema.ChunkTypeText)
+	chunk2 := schema.NewChunk(content, source, schema.ChunkTypeText)
+	chunk3 := schema.NewChunk(content+"  ", source, schema.ChunkTypeText) // Extra whitespace
 
 	// Same content should produce same hash
 	assert.Equal(t, chunk1.Hash, chunk2.Hash)
@@ -62,24 +63,24 @@ func TestChunkHashGeneration(t *testing.T) {
 
 // TestChunkTypes tests all chunk type constants
 func TestChunkTypes(t *testing.T) {
-	types := []ChunkType{
-		ChunkTypeText,
-		ChunkTypeParagraph,
-		ChunkTypeSentence,
-		ChunkTypeMarkdown,
-		ChunkTypePDF,
-		ChunkTypeCode,
+	types := []schema.ChunkType{
+		schema.ChunkTypeText,
+		schema.ChunkTypeParagraph,
+		schema.ChunkTypeSentence,
+		schema.ChunkTypeMarkdown,
+		schema.ChunkTypePDF,
+		schema.ChunkTypeCode,
 	}
 
 	for _, chunkType := range types {
-		chunk := NewChunk("test content", "test_source", chunkType)
+		chunk := schema.NewChunk("test content", "test_source", chunkType)
 		assert.Equal(t, chunkType, chunk.Type)
 	}
 }
 
 // TestChunkMetadata tests metadata handling
 func TestChunkMetadata(t *testing.T) {
-	chunk := NewChunk("test content", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test_source", schema.ChunkTypeText)
 
 	// Metadata should be initialized
 	assert.NotNil(t, chunk.Metadata)
@@ -96,7 +97,7 @@ func TestChunkMetadata(t *testing.T) {
 
 // TestChunkWithEmptyContent tests chunk creation with empty content
 func TestChunkWithEmptyContent(t *testing.T) {
-	chunk := NewChunk("", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("", "test_source", schema.ChunkTypeText)
 
 	assert.NotNil(t, chunk)
 	assert.Empty(t, chunk.Content)
@@ -112,7 +113,7 @@ func TestChunkWithLargeContent(t *testing.T) {
 		largeContent = largeContent[:i] + "a" + largeContent[i+1:]
 	}
 
-	chunk := NewChunk(largeContent, "test_source", ChunkTypeText)
+	chunk := schema.NewChunk(largeContent, "test_source", schema.ChunkTypeText)
 
 	assert.NotNil(t, chunk)
 	assert.Equal(t, len(largeContent), len(chunk.Content))
@@ -123,7 +124,7 @@ func TestChunkWithLargeContent(t *testing.T) {
 // TestChunkWithSpecialCharacters tests chunk creation with special characters
 func TestChunkWithSpecialCharacters(t *testing.T) {
 	specialContent := "Test with special chars: !@#$%^&*()_+-=[]{}|;':\",./<>?`~"
-	chunk := NewChunk(specialContent, "test_source", ChunkTypeText)
+	chunk := schema.NewChunk(specialContent, "test_source", schema.ChunkTypeText)
 
 	assert.NotNil(t, chunk)
 	assert.Equal(t, specialContent, chunk.Content)
@@ -134,7 +135,7 @@ func TestChunkWithSpecialCharacters(t *testing.T) {
 // TestChunkWithUnicodeContent tests chunk creation with Unicode content
 func TestChunkWithUnicodeContent(t *testing.T) {
 	unicodeContent := "Tiếng Việt: Xin chào! 中文: 你好! 日本語: こんにちは! Emoji: 😀🎉"
-	chunk := NewChunk(unicodeContent, "test_source", ChunkTypeText)
+	chunk := schema.NewChunk(unicodeContent, "test_source", schema.ChunkTypeText)
 
 	assert.NotNil(t, chunk)
 	assert.Equal(t, unicodeContent, chunk.Content)
@@ -145,7 +146,7 @@ func TestChunkWithUnicodeContent(t *testing.T) {
 // TestChunkCreatedAtTimestamp tests that CreatedAt is set correctly
 func TestChunkCreatedAtTimestamp(t *testing.T) {
 	before := time.Now()
-	chunk := NewChunk("test content", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test_source", schema.ChunkTypeText)
 	after := time.Now()
 
 	assert.False(t, chunk.CreatedAt.IsZero())
@@ -164,16 +165,16 @@ func TestChunkSourceField(t *testing.T) {
 	}
 
 	for _, source := range sources {
-		chunk := NewChunk("test content", source, ChunkTypeText)
+		chunk := schema.NewChunk("test content", source, schema.ChunkTypeText)
 		assert.Equal(t, source, chunk.Source)
 	}
 }
 
-// TestGenerateChunkID tests the generateChunkID function
+// TestGenerateChunkID tests the schema.GenerateChunkID function
 func TestGenerateChunkID(t *testing.T) {
-	id1 := generateChunkID("content", "source")
-	id2 := generateChunkID("content", "source")
-	id3 := generateChunkID("different", "source")
+	id1 := schema.GenerateChunkID("content", "source")
+	id2 := schema.GenerateChunkID("content", "source")
+	id3 := schema.GenerateChunkID("different", "source")
 
 	// Same inputs should produce same ID
 	assert.Equal(t, id1, id2)
@@ -185,11 +186,11 @@ func TestGenerateChunkID(t *testing.T) {
 	assert.Contains(t, id1, "chunk_")
 }
 
-// TestGenerateContentHash tests the generateContentHash function
+// TestGenerateContentHash tests the schema.GenerateContentHash function
 func TestGenerateContentHash(t *testing.T) {
-	hash1 := generateContentHash("content")
-	hash2 := generateContentHash("content")
-	hash3 := generateContentHash("different")
+	hash1 := schema.GenerateContentHash("content")
+	hash2 := schema.GenerateContentHash("content")
+	hash3 := schema.GenerateContentHash("different")
 
 	// Same content should produce same hash
 	assert.Equal(t, hash1, hash2)
@@ -203,38 +204,38 @@ func TestGenerateContentHash(t *testing.T) {
 
 // TestGenerateContentHashTrimsWhitespace tests that hash generation trims whitespace
 func TestGenerateContentHashTrimsWhitespace(t *testing.T) {
-	hash1 := generateContentHash("content")
-	hash2 := generateContentHash("  content  ")
-	hash3 := generateContentHash("content\n")
+	hash1 := schema.GenerateContentHash("content")
+	hash2 := schema.GenerateContentHash("  content  ")
+	hash3 := schema.GenerateContentHash("content\n")
 
 	// All should produce the same hash after trimming
 	assert.Equal(t, hash1, hash2)
 	assert.Equal(t, hash1, hash3)
 }
 
-// TestChunkingConfig tests the ChunkingConfig struct
+// Testschema.ChunkingConfig tests the schema.ChunkingConfig struct
 func TestChunkingConfig(t *testing.T) {
-	config := &ChunkingConfig{
-		Strategy:          StrategyParagraph,
+	config := &schema.ChunkingConfig{
+		Strategy:          schema.StrategyParagraph,
 		MaxSize:           1000,
 		Overlap:           100,
 		MinSize:           50,
 		PreserveStructure: true,
 	}
 
-	assert.Equal(t, StrategyParagraph, config.Strategy)
+	assert.Equal(t, schema.StrategyParagraph, config.Strategy)
 	assert.Equal(t, 1000, config.MaxSize)
 	assert.Equal(t, 100, config.Overlap)
 	assert.Equal(t, 50, config.MinSize)
 	assert.True(t, config.PreserveStructure)
 }
 
-// TestDefaultChunkingConfig tests the default configuration
+// TestDefaultschema.ChunkingConfig tests the default configuration
 func TestDefaultChunkingConfig(t *testing.T) {
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 
 	assert.NotNil(t, config)
-	assert.Equal(t, StrategyParagraph, config.Strategy)
+	assert.Equal(t, schema.StrategyParagraph, config.Strategy)
 	assert.Equal(t, 1000, config.MaxSize)
 	assert.Equal(t, 100, config.Overlap)
 	assert.Equal(t, 50, config.MinSize)
@@ -243,22 +244,22 @@ func TestDefaultChunkingConfig(t *testing.T) {
 
 // TestChunkingStrategies tests all chunking strategy constants
 func TestChunkingStrategies(t *testing.T) {
-	strategies := []ChunkingStrategy{
-		StrategyParagraph,
-		StrategySentence,
-		StrategyFixedSize,
-		StrategySemantic,
+	strategies := []schema.ChunkingStrategy{
+		schema.StrategyParagraph,
+		schema.StrategySentence,
+		schema.StrategyFixedSize,
+		schema.StrategySemantic,
 	}
 
 	for _, strategy := range strategies {
-		config := &ChunkingConfig{Strategy: strategy}
+		config := &schema.ChunkingConfig{Strategy: strategy}
 		assert.Equal(t, strategy, config.Strategy)
 	}
 }
 
 // TestChunkMetadataEnrichment tests metadata enrichment
 func TestChunkMetadataEnrichment(t *testing.T) {
-	chunk := NewChunk("test content", "test.txt", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test.txt", schema.ChunkTypeText)
 
 	// Add custom metadata
 	chunk.Metadata["custom_field"] = "custom_value"
@@ -270,7 +271,7 @@ func TestChunkMetadataEnrichment(t *testing.T) {
 
 // TestChunkImmutabilityOfIDAndHash tests that ID and Hash are set at creation
 func TestChunkImmutabilityOfIDAndHash(t *testing.T) {
-	chunk := NewChunk("test content", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test_source", schema.ChunkTypeText)
 
 	originalID := chunk.ID
 	originalHash := chunk.Hash
@@ -287,9 +288,9 @@ func TestChunkImmutabilityOfIDAndHash(t *testing.T) {
 func TestMultipleChunksFromSameSource(t *testing.T) {
 	source := "document.txt"
 
-	chunk1 := NewChunk("First paragraph", source, ChunkTypeParagraph)
-	chunk2 := NewChunk("Second paragraph", source, ChunkTypeParagraph)
-	chunk3 := NewChunk("Third paragraph", source, ChunkTypeParagraph)
+	chunk1 := schema.NewChunk("First paragraph", source, schema.ChunkTypeParagraph)
+	chunk2 := schema.NewChunk("Second paragraph", source, schema.ChunkTypeParagraph)
+	chunk3 := schema.NewChunk("Third paragraph", source, schema.ChunkTypeParagraph)
 
 	// All should have the same source
 	assert.Equal(t, source, chunk1.Source)
@@ -308,13 +309,13 @@ func TestChunkWithDifferentTypes(t *testing.T) {
 	content := "Test content"
 	source := "test_source"
 
-	textChunk := NewChunk(content, source, ChunkTypeText)
-	codeChunk := NewChunk(content, source, ChunkTypeCode)
-	markdownChunk := NewChunk(content, source, ChunkTypeMarkdown)
+	textChunk := schema.NewChunk(content, source, schema.ChunkTypeText)
+	codeChunk := schema.NewChunk(content, source, schema.ChunkTypeCode)
+	markdownChunk := schema.NewChunk(content, source, schema.ChunkTypeMarkdown)
 
-	assert.Equal(t, ChunkTypeText, textChunk.Type)
-	assert.Equal(t, ChunkTypeCode, codeChunk.Type)
-	assert.Equal(t, ChunkTypeMarkdown, markdownChunk.Type)
+	assert.Equal(t, schema.ChunkTypeText, textChunk.Type)
+	assert.Equal(t, schema.ChunkTypeCode, codeChunk.Type)
+	assert.Equal(t, schema.ChunkTypeMarkdown, markdownChunk.Type)
 
 	// Same content but different types should have different IDs
 	// because ID is based on content + source
@@ -324,7 +325,7 @@ func TestChunkWithDifferentTypes(t *testing.T) {
 
 // TestChunkJSONSerialization tests that chunks can be serialized to JSON
 func TestChunkJSONSerialization(t *testing.T) {
-	chunk := NewChunk("test content", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test_source", schema.ChunkTypeText)
 	chunk.Metadata["key"] = "value"
 
 	// This test verifies the struct has proper JSON tags
@@ -340,7 +341,7 @@ func TestChunkJSONSerialization(t *testing.T) {
 
 // TestChunkFieldValidation tests that all required fields are set
 func TestChunkFieldValidation(t *testing.T) {
-	chunk := NewChunk("test content", "test_source", ChunkTypeText)
+	chunk := schema.NewChunk("test content", "test_source", schema.ChunkTypeText)
 
 	// Verify all fields are properly initialized
 	require.NotEmpty(t, chunk.ID, "ID should not be empty")
@@ -355,13 +356,13 @@ func TestChunkFieldValidation(t *testing.T) {
 // TestChunkConcurrentCreation tests creating chunks concurrently
 func TestChunkConcurrentCreation(t *testing.T) {
 	const numChunks = 100
-	chunks := make([]*Chunk, numChunks)
+	chunks := make([]*schema.Chunk, numChunks)
 	done := make(chan bool, numChunks)
 
 	for i := 0; i < numChunks; i++ {
 		go func(index int) {
 			content := "Content " + string(rune(index))
-			chunks[index] = NewChunk(content, "test_source", ChunkTypeText)
+			chunks[index] = schema.NewChunk(content, "test_source", schema.ChunkTypeText)
 			done <- true
 		}(i)
 	}

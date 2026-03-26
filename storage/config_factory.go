@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/vector"
 	"gopkg.in/yaml.v3"
 )
 
@@ -99,38 +101,17 @@ func (cf *ConfigFactory) CreateFileBasedConfig(dataDir string) *StorageConfig {
 	config.Relational.Database = filepath.Join(dataDir, "memory.db")
 	config.Relational.MaxConnections = 5
 
-	// Kuzu for graph storage
-	config.Graph.Type = GraphStoreTypeKuzu
-	config.Graph.Kuzu = &KuzuConfig{
-		DatabasePath:          filepath.Join(dataDir, "graph.kuzu"),
-		BufferPoolSize:        256 * 1024 * 1024, // 256MB
-		MaxNumThreads:         4,
-		EnableCompression:     true,
-		CheckpointWaitTimeout: 30 * time.Second,
-		EnableCheckpoint:      true,
-		LogLevel:              "info",
-		HashJoinSizeRatio:     1.5,
-		EnableSemiMask:        true,
-		EnableZoneMap:         true,
-		EnableProgressBar:     false,
-	}
+	// SQLite for graph storage (using recursive CTEs)
+	config.Graph.Type = graph.StoreTypeSQLite
+	config.Graph.Database = filepath.Join(dataDir, "graph.db")
+	config.Graph.BatchSize = 100
+	config.Graph.ConnTimeout = 30 * time.Second
 
-	// LanceDB for vector storage
-	config.Vector.Type = VectorStoreTypeLanceDB
-	config.Vector.LanceDB = &LanceDBConfig{
-		URI:               filepath.Join(dataDir, "vectors.lance"),
-		StorageType:       "local",
-		DataDir:           dataDir,
-		TableName:         "embeddings",
-		BlockSize:         8192,
-		MaxRowsPerFile:    1000000,
-		MaxRowsPerGroup:   10000,
-		MaxBytesPerFile:   1024 * 1024 * 1024, // 1GB
-		IndexCacheSize:    100,
-		MetricType:        "cosine",
-		EnableStatistics:  true,
-		EnableBloomFilter: true,
-	}
+	// SQLite for vector storage
+	config.Vector.Type = vector.StoreTypeSQLite
+	config.Vector.Database = filepath.Join(dataDir, "vectors.db")
+	config.Vector.Collection = "embeddings"
+	config.Vector.Dimension = 768
 
 	return config
 }
@@ -148,11 +129,11 @@ func (cf *ConfigFactory) CreateCloudConfig() *StorageConfig {
 	config.Relational.EnableJSONIndexes = true
 
 	// Neo4j for graph storage
-	config.Graph.Type = GraphStoreTypeNeo4j
+	config.Graph.Type = graph.StoreTypeNeo4j
 	config.Graph.MaxConnections = 20
 	config.Graph.EnableIndexing = true
 	config.Graph.EnableCaching = true
-	config.Graph.Neo4j = &Neo4jConfig{
+	config.Graph.Neo4j = &graph.Neo4jConfig{
 		MaxConnectionLife: 30 * time.Minute,
 		MaxConnectionPool: 20,
 		ConnectionTimeout: 30 * time.Second,
@@ -165,10 +146,10 @@ func (cf *ConfigFactory) CreateCloudConfig() *StorageConfig {
 	}
 
 	// Qdrant for vector storage
-	config.Vector.Type = VectorStoreTypeQdrant
+	config.Vector.Type = vector.StoreTypeQdrant
 	config.Vector.MaxConnections = 20
 	config.Vector.EnableCaching = true
-	config.Vector.Qdrant = &QdrantConfig{
+	config.Vector.Qdrant = &vector.QdrantConfig{
 		Timeout:           30 * time.Second,
 		MaxConnections:    20,
 		EnableTLS:         true,
@@ -195,8 +176,8 @@ func (cf *ConfigFactory) CreateDevelopmentConfig() *StorageConfig {
 	config.Relational.Database = ":memory:"
 	config.Relational.MaxConnections = 5
 
-	config.Graph.Type = GraphStoreTypeInMemory
-	config.Vector.Type = VectorStoreTypeInMemory
+	config.Graph.Type = graph.StoreTypeInMemory
+	config.Vector.Type = vector.StoreTypeInMemory
 
 	return config
 }
@@ -294,8 +275,8 @@ func (cf *ConfigFactory) addCommonProfiles() {
 	hybridConfig := DefaultStorageConfig()
 	hybridConfig.Environment = "production"
 	hybridConfig.Relational.Type = StorageTypePostgreSQL
-	hybridConfig.Graph.Type = GraphStoreTypeSurrealDB
-	hybridConfig.Vector.Type = VectorStoreTypePgVector
+	hybridConfig.Graph.Type = graph.StoreTypeSurrealDB
+	hybridConfig.Vector.Type = vector.StoreTypePgVector
 	cf.profiles["hybrid"] = hybridConfig
 }
 
@@ -373,7 +354,7 @@ func (cf *ConfigFactory) loadRelationalSettings(config *StorageConfig) error {
 
 func (cf *ConfigFactory) loadGraphSettings(config *StorageConfig) error {
 	if graphType := os.Getenv("AI_MEMORY_GRAPH_TYPE"); graphType != "" {
-		config.Graph.Type = GraphStoreType(graphType)
+		config.Graph.Type = graph.GraphStoreType(graphType)
 	}
 
 	if host := os.Getenv("AI_MEMORY_GRAPH_HOST"); host != "" {
@@ -408,7 +389,7 @@ func (cf *ConfigFactory) loadGraphSettings(config *StorageConfig) error {
 
 func (cf *ConfigFactory) loadVectorSettings(config *StorageConfig) error {
 	if vectorType := os.Getenv("AI_MEMORY_VECTOR_TYPE"); vectorType != "" {
-		config.Vector.Type = VectorStoreType(vectorType)
+		config.Vector.Type = vector.VectorStoreType(vectorType)
 	}
 
 	if host := os.Getenv("AI_MEMORY_VECTOR_HOST"); host != "" {
@@ -456,28 +437,28 @@ func (cf *ConfigFactory) loadVectorSettings(config *StorageConfig) error {
 func (cf *ConfigFactory) loadNeo4jSettings(config *StorageConfig) {
 	if uri := os.Getenv("AI_MEMORY_NEO4J_URI"); uri != "" {
 		if config.Graph.Neo4j == nil {
-			config.Graph.Neo4j = &Neo4jConfig{}
+			config.Graph.Neo4j = &graph.Neo4jConfig{}
 		}
 		config.Graph.Neo4j.URI = uri
 	}
 
 	if realm := os.Getenv("AI_MEMORY_NEO4J_REALM"); realm != "" {
 		if config.Graph.Neo4j == nil {
-			config.Graph.Neo4j = &Neo4jConfig{}
+			config.Graph.Neo4j = &graph.Neo4jConfig{}
 		}
 		config.Graph.Neo4j.Realm = realm
 	}
 
 	if encryption := os.Getenv("AI_MEMORY_NEO4J_ENCRYPTION_LEVEL"); encryption != "" {
 		if config.Graph.Neo4j == nil {
-			config.Graph.Neo4j = &Neo4jConfig{}
+			config.Graph.Neo4j = &graph.Neo4jConfig{}
 		}
 		config.Graph.Neo4j.EncryptionLevel = encryption
 	}
 
 	if trust := os.Getenv("AI_MEMORY_NEO4J_TRUST_STRATEGY"); trust != "" {
 		if config.Graph.Neo4j == nil {
-			config.Graph.Neo4j = &Neo4jConfig{}
+			config.Graph.Neo4j = &graph.Neo4jConfig{}
 		}
 		config.Graph.Neo4j.TrustStrategy = trust
 	}
@@ -486,28 +467,28 @@ func (cf *ConfigFactory) loadNeo4jSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadSurrealDBSettings(config *StorageConfig) {
 	if endpoint := os.Getenv("AI_MEMORY_SURREALDB_ENDPOINT"); endpoint != "" {
 		if config.Graph.SurrealDB == nil {
-			config.Graph.SurrealDB = &SurrealDBConfig{}
+			config.Graph.SurrealDB = &graph.SurrealDBConfig{}
 		}
 		config.Graph.SurrealDB.Endpoint = endpoint
 	}
 
 	if namespace := os.Getenv("AI_MEMORY_SURREALDB_NAMESPACE"); namespace != "" {
 		if config.Graph.SurrealDB == nil {
-			config.Graph.SurrealDB = &SurrealDBConfig{}
+			config.Graph.SurrealDB = &graph.SurrealDBConfig{}
 		}
 		config.Graph.SurrealDB.Namespace = namespace
 	}
 
 	if scope := os.Getenv("AI_MEMORY_SURREALDB_SCOPE"); scope != "" {
 		if config.Graph.SurrealDB == nil {
-			config.Graph.SurrealDB = &SurrealDBConfig{}
+			config.Graph.SurrealDB = &graph.SurrealDBConfig{}
 		}
 		config.Graph.SurrealDB.Scope = scope
 	}
 
 	if token := os.Getenv("AI_MEMORY_SURREALDB_TOKEN"); token != "" {
 		if config.Graph.SurrealDB == nil {
-			config.Graph.SurrealDB = &SurrealDBConfig{}
+			config.Graph.SurrealDB = &graph.SurrealDBConfig{}
 		}
 		config.Graph.SurrealDB.Token = token
 	}
@@ -516,7 +497,7 @@ func (cf *ConfigFactory) loadSurrealDBSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadKuzuSettings(config *StorageConfig) {
 	if dbPath := os.Getenv("AI_MEMORY_KUZU_DATABASE_PATH"); dbPath != "" {
 		if config.Graph.Kuzu == nil {
-			config.Graph.Kuzu = &KuzuConfig{}
+			config.Graph.Kuzu = &graph.KuzuConfig{}
 		}
 		config.Graph.Kuzu.DatabasePath = dbPath
 	}
@@ -524,7 +505,7 @@ func (cf *ConfigFactory) loadKuzuSettings(config *StorageConfig) {
 	if bufferSize := os.Getenv("AI_MEMORY_KUZU_BUFFER_POOL_SIZE"); bufferSize != "" {
 		if bs, err := strconv.ParseInt(bufferSize, 10, 64); err == nil {
 			if config.Graph.Kuzu == nil {
-				config.Graph.Kuzu = &KuzuConfig{}
+				config.Graph.Kuzu = &graph.KuzuConfig{}
 			}
 			config.Graph.Kuzu.BufferPoolSize = bs
 		}
@@ -533,7 +514,7 @@ func (cf *ConfigFactory) loadKuzuSettings(config *StorageConfig) {
 	if maxThreads := os.Getenv("AI_MEMORY_KUZU_MAX_NUM_THREADS"); maxThreads != "" {
 		if mt, err := strconv.Atoi(maxThreads); err == nil {
 			if config.Graph.Kuzu == nil {
-				config.Graph.Kuzu = &KuzuConfig{}
+				config.Graph.Kuzu = &graph.KuzuConfig{}
 			}
 			config.Graph.Kuzu.MaxNumThreads = mt
 		}
@@ -543,7 +524,7 @@ func (cf *ConfigFactory) loadKuzuSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadQdrantSettings(config *StorageConfig) {
 	if apiKey := os.Getenv("AI_MEMORY_QDRANT_API_KEY"); apiKey != "" {
 		if config.Vector.Qdrant == nil {
-			config.Vector.Qdrant = &QdrantConfig{}
+			config.Vector.Qdrant = &vector.QdrantConfig{}
 		}
 		config.Vector.Qdrant.APIKey = apiKey
 	}
@@ -551,7 +532,7 @@ func (cf *ConfigFactory) loadQdrantSettings(config *StorageConfig) {
 	if grpc := os.Getenv("AI_MEMORY_QDRANT_ENABLE_GRPC"); grpc != "" {
 		if enabled, err := strconv.ParseBool(grpc); err == nil {
 			if config.Vector.Qdrant == nil {
-				config.Vector.Qdrant = &QdrantConfig{}
+				config.Vector.Qdrant = &vector.QdrantConfig{}
 			}
 			config.Vector.Qdrant.EnableGRPC = enabled
 		}
@@ -560,7 +541,7 @@ func (cf *ConfigFactory) loadQdrantSettings(config *StorageConfig) {
 	if grpcPort := os.Getenv("AI_MEMORY_QDRANT_GRPC_PORT"); grpcPort != "" {
 		if port, err := strconv.Atoi(grpcPort); err == nil {
 			if config.Vector.Qdrant == nil {
-				config.Vector.Qdrant = &QdrantConfig{}
+				config.Vector.Qdrant = &vector.QdrantConfig{}
 			}
 			config.Vector.Qdrant.GRPCPort = port
 		}
@@ -570,28 +551,28 @@ func (cf *ConfigFactory) loadQdrantSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadLanceDBSettings(config *StorageConfig) {
 	if uri := os.Getenv("AI_MEMORY_LANCEDB_URI"); uri != "" {
 		if config.Vector.LanceDB == nil {
-			config.Vector.LanceDB = &LanceDBConfig{}
+			config.Vector.LanceDB = &vector.LanceDBConfig{}
 		}
 		config.Vector.LanceDB.URI = uri
 	}
 
 	if storageType := os.Getenv("AI_MEMORY_LANCEDB_STORAGE_TYPE"); storageType != "" {
 		if config.Vector.LanceDB == nil {
-			config.Vector.LanceDB = &LanceDBConfig{}
+			config.Vector.LanceDB = &vector.LanceDBConfig{}
 		}
 		config.Vector.LanceDB.StorageType = storageType
 	}
 
 	if dataDir := os.Getenv("AI_MEMORY_LANCEDB_DATA_DIR"); dataDir != "" {
 		if config.Vector.LanceDB == nil {
-			config.Vector.LanceDB = &LanceDBConfig{}
+			config.Vector.LanceDB = &vector.LanceDBConfig{}
 		}
 		config.Vector.LanceDB.DataDir = dataDir
 	}
 
 	if tableName := os.Getenv("AI_MEMORY_LANCEDB_TABLE_NAME"); tableName != "" {
 		if config.Vector.LanceDB == nil {
-			config.Vector.LanceDB = &LanceDBConfig{}
+			config.Vector.LanceDB = &vector.LanceDBConfig{}
 		}
 		config.Vector.LanceDB.TableName = tableName
 	}
@@ -601,7 +582,7 @@ func (cf *ConfigFactory) loadPgVectorSettings(config *StorageConfig) {
 	if dimensions := os.Getenv("AI_MEMORY_PGVECTOR_VECTOR_DIMENSIONS"); dimensions != "" {
 		if d, err := strconv.Atoi(dimensions); err == nil {
 			if config.Vector.PgVector == nil {
-				config.Vector.PgVector = &PgVectorConfig{}
+				config.Vector.PgVector = &vector.PgVectorConfig{}
 			}
 			config.Vector.PgVector.VectorDimensions = d
 		}
@@ -609,14 +590,14 @@ func (cf *ConfigFactory) loadPgVectorSettings(config *StorageConfig) {
 
 	if indexType := os.Getenv("AI_MEMORY_PGVECTOR_INDEX_TYPE"); indexType != "" {
 		if config.Vector.PgVector == nil {
-			config.Vector.PgVector = &PgVectorConfig{}
+			config.Vector.PgVector = &vector.PgVectorConfig{}
 		}
 		config.Vector.PgVector.IndexType = indexType
 	}
 
 	if tableName := os.Getenv("AI_MEMORY_PGVECTOR_TABLE_NAME"); tableName != "" {
 		if config.Vector.PgVector == nil {
-			config.Vector.PgVector = &PgVectorConfig{}
+			config.Vector.PgVector = &vector.PgVectorConfig{}
 		}
 		config.Vector.PgVector.TableName = tableName
 	}
@@ -625,21 +606,21 @@ func (cf *ConfigFactory) loadPgVectorSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadChromaDBSettings(config *StorageConfig) {
 	if apiKey := os.Getenv("AI_MEMORY_CHROMADB_API_KEY"); apiKey != "" {
 		if config.Vector.ChromaDB == nil {
-			config.Vector.ChromaDB = &ChromaDBConfig{}
+			config.Vector.ChromaDB = &vector.ChromaDBConfig{}
 		}
 		config.Vector.ChromaDB.APIKey = apiKey
 	}
 
 	if tenant := os.Getenv("AI_MEMORY_CHROMADB_TENANT"); tenant != "" {
 		if config.Vector.ChromaDB == nil {
-			config.Vector.ChromaDB = &ChromaDBConfig{}
+			config.Vector.ChromaDB = &vector.ChromaDBConfig{}
 		}
 		config.Vector.ChromaDB.Tenant = tenant
 	}
 
 	if collection := os.Getenv("AI_MEMORY_CHROMADB_DEFAULT_COLLECTION"); collection != "" {
 		if config.Vector.ChromaDB == nil {
-			config.Vector.ChromaDB = &ChromaDBConfig{}
+			config.Vector.ChromaDB = &vector.ChromaDBConfig{}
 		}
 		config.Vector.ChromaDB.DefaultCollectionName = collection
 	}
@@ -648,21 +629,21 @@ func (cf *ConfigFactory) loadChromaDBSettings(config *StorageConfig) {
 func (cf *ConfigFactory) loadRedisSettings(config *StorageConfig) {
 	if indexName := os.Getenv("AI_MEMORY_REDIS_INDEX_NAME"); indexName != "" {
 		if config.Vector.Redis == nil {
-			config.Vector.Redis = &RedisConfig{}
+			config.Vector.Redis = &vector.RedisConfig{}
 		}
 		config.Vector.Redis.IndexName = indexName
 	}
 
 	if vectorField := os.Getenv("AI_MEMORY_REDIS_VECTOR_FIELD"); vectorField != "" {
 		if config.Vector.Redis == nil {
-			config.Vector.Redis = &RedisConfig{}
+			config.Vector.Redis = &vector.RedisConfig{}
 		}
 		config.Vector.Redis.VectorField = vectorField
 	}
 
 	if algorithm := os.Getenv("AI_MEMORY_REDIS_VECTOR_ALGORITHM"); algorithm != "" {
 		if config.Vector.Redis == nil {
-			config.Vector.Redis = &RedisConfig{}
+			config.Vector.Redis = &vector.RedisConfig{}
 		}
 		config.Vector.Redis.VectorAlgorithm = algorithm
 	}
@@ -688,7 +669,7 @@ func (cf *ConfigFactory) validateRelationalConfig(config *RelationalConfig) erro
 	return nil
 }
 
-func (cf *ConfigFactory) validateGraphConfig(config *GraphConfig) error {
+func (cf *ConfigFactory) validateGraphConfig(config *graph.GraphConfig) error {
 	if config == nil {
 		return fmt.Errorf("graph config cannot be nil")
 	}
@@ -704,7 +685,7 @@ func (cf *ConfigFactory) validateGraphConfig(config *GraphConfig) error {
 	return nil
 }
 
-func (cf *ConfigFactory) validateVectorConfig(config *VectorConfig) error {
+func (cf *ConfigFactory) validateVectorConfig(config *vector.VectorConfig) error {
 	if config == nil {
 		return fmt.Errorf("vector config cannot be nil")
 	}

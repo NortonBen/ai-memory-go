@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // PerformanceBaseline defines expected performance characteristics
@@ -178,7 +180,7 @@ func TestMemoryLeakRegression(t *testing.T) {
 	tempDir := t.TempDir()
 	testFiles := createRegressionTestFiles(t, tempDir, 5, 1000)
 
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	// Measure initial memory
@@ -235,7 +237,7 @@ func TestCacheRegressionPerformance(t *testing.T) {
 
 	// Test cache hit performance
 	t.Run("CacheHitPerformance", func(t *testing.T) {
-		parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+		parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), DefaultCacheConfig())
 		defer parser.Close()
 
 		ctx := context.Background()
@@ -271,7 +273,7 @@ func TestCacheRegressionPerformance(t *testing.T) {
 
 	// Test cache miss performance
 	t.Run("CacheMissPerformance", func(t *testing.T) {
-		parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+		parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), DefaultCacheConfig())
 		defer parser.Close()
 
 		ctx := context.Background()
@@ -287,7 +289,7 @@ func TestCacheRegressionPerformance(t *testing.T) {
 		cacheMissTime := time.Since(start)
 
 		// Cache misses should not be significantly slower than uncached parsing
-		uncachedParser := NewUnifiedParser(DefaultChunkingConfig())
+		uncachedParser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer uncachedParser.Close()
 
 		start = time.Now()
@@ -321,7 +323,7 @@ type PerformanceResult struct {
 
 // runPerformanceTest runs a comprehensive performance test
 func runPerformanceTest(t *testing.T, testFiles []string, expectedBytes int64) PerformanceResult {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -359,7 +361,7 @@ func runPerformanceTest(t *testing.T, testFiles []string, expectedBytes int64) P
 
 // measureSequentialPerformance measures baseline sequential performance
 func measureSequentialPerformance(t *testing.T, testFiles []string) time.Duration {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -385,7 +387,7 @@ func measureParallelPerformance(t *testing.T, testFiles []string, concurrency in
 		RetryDelay:    100 * time.Millisecond,
 	}
 
-	parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+	parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 	defer parser.Close()
 
 	ctx := context.Background()

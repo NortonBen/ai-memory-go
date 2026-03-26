@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ComparisonResult holds performance comparison data
@@ -41,15 +43,15 @@ func TestParserTypeComparison(t *testing.T) {
 		{
 			"UnifiedParser_Default",
 			func() (Parser, func()) {
-				parser := NewUnifiedParser(DefaultChunkingConfig())
+				parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 				return parser, func() { parser.Close() }
 			},
 		},
 		{
 			"UnifiedParser_SmallChunks",
 			func() (Parser, func()) {
-				config := &ChunkingConfig{
-					Strategy: StrategyParagraph,
+				config := &schema.ChunkingConfig{
+					Strategy: schema.StrategyParagraph,
 					MaxSize:  500,
 					MinSize:  50,
 					Overlap:  50,
@@ -61,8 +63,8 @@ func TestParserTypeComparison(t *testing.T) {
 		{
 			"UnifiedParser_LargeChunks",
 			func() (Parser, func()) {
-				config := &ChunkingConfig{
-					Strategy: StrategyParagraph,
+				config := &schema.ChunkingConfig{
+					Strategy: schema.StrategyParagraph,
 					MaxSize:  2000,
 					MinSize:  200,
 					Overlap:  200,
@@ -74,7 +76,7 @@ func TestParserTypeComparison(t *testing.T) {
 		{
 			"CachedParser_Default",
 			func() (Parser, func()) {
-				parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+				parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), DefaultCacheConfig())
 				return parser, func() { parser.Close() }
 			},
 		},
@@ -121,12 +123,12 @@ func TestChunkingStrategyComparison(t *testing.T) {
 
 	strategies := []struct {
 		name   string
-		config *ChunkingConfig
+		config *schema.ChunkingConfig
 	}{
 		{
 			"Paragraph_Strategy",
-			&ChunkingConfig{
-				Strategy: StrategyParagraph,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyParagraph,
 				MaxSize:  1000,
 				MinSize:  100,
 				Overlap:  100,
@@ -134,8 +136,8 @@ func TestChunkingStrategyComparison(t *testing.T) {
 		},
 		{
 			"Sentence_Strategy",
-			&ChunkingConfig{
-				Strategy: StrategySentence,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategySentence,
 				MaxSize:  1000,
 				MinSize:  100,
 				Overlap:  100,
@@ -143,8 +145,8 @@ func TestChunkingStrategyComparison(t *testing.T) {
 		},
 		{
 			"FixedSize_Strategy",
-			&ChunkingConfig{
-				Strategy: StrategyFixedSize,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyFixedSize,
 				MaxSize:  1000,
 				MinSize:  100,
 				Overlap:  100,
@@ -251,7 +253,7 @@ func TestWorkerPoolConfigComparison(t *testing.T) {
 
 	for i, config := range workerConfigs {
 		t.Run(config.name, func(t *testing.T) {
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config.config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config.config)
 			defer parser.Close()
 
 			result := measureWorkerPoolPerformance(t, parser, testFiles, config.name)
@@ -347,12 +349,12 @@ func TestCacheConfigComparison(t *testing.T) {
 
 			if config.config == nil {
 				// No cache
-				uncachedParser := NewUnifiedParser(DefaultChunkingConfig())
+				uncachedParser := NewUnifiedParser(schema.DefaultChunkingConfig())
 				parser = uncachedParser
 				cleanup = func() { uncachedParser.Close() }
 			} else {
 				// With cache
-				cachedParser := NewCachedUnifiedParser(DefaultChunkingConfig(), config.config)
+				cachedParser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), config.config)
 				parser = cachedParser
 				cleanup = func() { cachedParser.Close() }
 			}
@@ -578,7 +580,7 @@ func measureCachePerformance(t *testing.T, parser Parser, testFiles []string, na
 }
 
 func measureRegularParsingPerformance(t *testing.T, filePath, name string) ComparisonResult {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -621,7 +623,7 @@ func measureRegularParsingPerformance(t *testing.T, filePath, name string) Compa
 }
 
 func measureStreamingParsingPerformance(t *testing.T, filePath, name string) ComparisonResult {
-	parser := NewStreamingParser(DefaultStreamingConfig(), DefaultChunkingConfig())
+	parser := NewStreamingParser(DefaultStreamingConfig(), schema.DefaultChunkingConfig())
 
 	ctx := context.Background()
 

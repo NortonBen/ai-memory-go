@@ -8,7 +8,16 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
+
+	_ "github.com/NortonBen/ai-memory-go/graph/adapters/inmemory"
+	_ "github.com/NortonBen/ai-memory-go/graph/adapters/sqlite"
+	_ "github.com/NortonBen/ai-memory-go/vector/adapters/inmemory"
+	_ "github.com/NortonBen/ai-memory-go/vector/adapters/sqlite"
+
 	"github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -75,7 +84,7 @@ func (m *mockVectorStore) Close() error {
 	return nil
 }
 
-// PostgreSQLConnection implements Connection for PostgreSQL
+// PostgreSQLConnection implements schema.Connection for PostgreSQL
 type PostgreSQLConnection struct {
 	db       *sql.DB
 	lastUsed time.Time
@@ -135,7 +144,7 @@ func (c *PostgreSQLConnection) GetDB() *sql.DB {
 	return c.db
 }
 
-// SQLiteConnection implements Connection for SQLite
+// SQLiteConnection implements schema.Connection for SQLite
 type SQLiteConnection struct {
 	db       *sql.DB
 	lastUsed time.Time
@@ -315,7 +324,7 @@ func (c *VectorConnection) GetStore() vector.VectorStore {
 	return c.store
 }
 
-// Connection factory implementations
+// schema.Connection factory implementations
 
 // PostgreSQLConnectionFactory creates PostgreSQL connections
 type PostgreSQLConnectionFactory struct {
@@ -330,7 +339,7 @@ func NewPostgreSQLConnectionFactory(config *RelationalConfig) *PostgreSQLConnect
 }
 
 // CreateConnection creates a new PostgreSQL connection
-func (f *PostgreSQLConnectionFactory) CreateConnection(ctx context.Context) (Connection, error) {
+func (f *PostgreSQLConnectionFactory) CreateConnection(ctx context.Context) (schema.Connection, error) {
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		f.config.Host, f.config.Port, f.config.Username, f.config.Password, f.config.Database, f.config.SSLMode)
 
@@ -355,7 +364,7 @@ func (f *PostgreSQLConnectionFactory) CreateConnection(ctx context.Context) (Con
 }
 
 // ValidateConnection validates a PostgreSQL connection
-func (f *PostgreSQLConnectionFactory) ValidateConnection(ctx context.Context, conn Connection) error {
+func (f *PostgreSQLConnectionFactory) ValidateConnection(ctx context.Context, conn schema.Connection) error {
 	pgConn, ok := conn.(*PostgreSQLConnection)
 	if !ok {
 		return fmt.Errorf("invalid connection type for PostgreSQL")
@@ -377,7 +386,7 @@ func NewSQLiteConnectionFactory(config *RelationalConfig) *SQLiteConnectionFacto
 }
 
 // CreateConnection creates a new SQLite connection
-func (f *SQLiteConnectionFactory) CreateConnection(ctx context.Context) (Connection, error) {
+func (f *SQLiteConnectionFactory) CreateConnection(ctx context.Context) (schema.Connection, error) {
 	db, err := sql.Open("sqlite3", f.config.Database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open SQLite connection: %w", err)
@@ -399,7 +408,7 @@ func (f *SQLiteConnectionFactory) CreateConnection(ctx context.Context) (Connect
 }
 
 // ValidateConnection validates a SQLite connection
-func (f *SQLiteConnectionFactory) ValidateConnection(ctx context.Context, conn Connection) error {
+func (f *SQLiteConnectionFactory) ValidateConnection(ctx context.Context, conn schema.Connection) error {
 	sqliteConn, ok := conn.(*SQLiteConnection)
 	if !ok {
 		return fmt.Errorf("invalid connection type for SQLite")
@@ -410,41 +419,19 @@ func (f *SQLiteConnectionFactory) ValidateConnection(ctx context.Context, conn C
 
 // GraphConnectionFactory creates graph connections
 type GraphConnectionFactory struct {
-	config *GraphConfig
+	config *graph.GraphConfig
 }
 
 // NewGraphConnectionFactory creates a new graph connection factory
-func NewGraphConnectionFactory(config *GraphConfig) *GraphConnectionFactory {
+func NewGraphConnectionFactory(config *graph.GraphConfig) *GraphConnectionFactory {
 	return &GraphConnectionFactory{
 		config: config,
 	}
 }
 
 // CreateConnection creates a new graph connection
-func (f *GraphConnectionFactory) CreateConnection(ctx context.Context) (Connection, error) {
-	// This would create the appropriate graph store based on config.Type
-	// For now, we'll use a placeholder implementation
-
-	var store graph.GraphStore
-	var err error
-
-	switch f.config.Type {
-	case GraphStoreTypeNeo4j:
-		// store, err = graph.NewNeo4jStore(f.config.Neo4j)
-		return nil, fmt.Errorf("Neo4j implementation not yet available")
-	case GraphStoreTypeSurrealDB:
-		// store, err = graph.NewSurrealDBStore(f.config.SurrealDB)
-		return nil, fmt.Errorf("SurrealDB implementation not yet available")
-	case GraphStoreTypeKuzu:
-		// store, err = graph.NewKuzuStore(f.config.Kuzu)
-		return nil, fmt.Errorf("Kuzu implementation not yet available")
-	case GraphStoreTypeInMemory:
-		// Use the existing in-memory implementation
-		store, err = graph.NewInMemoryGraphStore(), nil
-	default:
-		return nil, fmt.Errorf("unsupported graph store type: %s", f.config.Type)
-	}
-
+func (f *GraphConnectionFactory) CreateConnection(ctx context.Context) (schema.Connection, error) {
+	store, err := graph.NewStore(f.config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create graph store: %w", err)
 	}
@@ -453,7 +440,7 @@ func (f *GraphConnectionFactory) CreateConnection(ctx context.Context) (Connecti
 }
 
 // ValidateConnection validates a graph connection
-func (f *GraphConnectionFactory) ValidateConnection(ctx context.Context, conn Connection) error {
+func (f *GraphConnectionFactory) ValidateConnection(ctx context.Context, conn schema.Connection) error {
 	graphConn, ok := conn.(*GraphConnection)
 	if !ok {
 		return fmt.Errorf("invalid connection type for graph store")
@@ -464,41 +451,19 @@ func (f *GraphConnectionFactory) ValidateConnection(ctx context.Context, conn Co
 
 // VectorConnectionFactory creates vector connections
 type VectorConnectionFactory struct {
-	config *VectorConfig
+	config *vector.VectorConfig
 }
 
 // NewVectorConnectionFactory creates a new vector connection factory
-func NewVectorConnectionFactory(config *VectorConfig) *VectorConnectionFactory {
+func NewVectorConnectionFactory(config *vector.VectorConfig) *VectorConnectionFactory {
 	return &VectorConnectionFactory{
 		config: config,
 	}
 }
 
 // CreateConnection creates a new vector connection
-func (f *VectorConnectionFactory) CreateConnection(ctx context.Context) (Connection, error) {
-	// This would create the appropriate vector store based on config.Type
-	// For now, we'll use a placeholder implementation
-
-	var store vector.VectorStore
-	var err error
-
-	switch f.config.Type {
-	case VectorStoreTypeQdrant:
-		// store, err = vector.NewQdrantStore(f.config.Qdrant)
-		return nil, fmt.Errorf("Qdrant implementation not yet available")
-	case VectorStoreTypeLanceDB:
-		// store, err = vector.NewLanceDBStore(f.config.LanceDB)
-		return nil, fmt.Errorf("LanceDB implementation not yet available")
-	case VectorStoreTypePgVector:
-		// store, err = vector.NewPgVectorStore(f.config.PgVector)
-		return nil, fmt.Errorf("pgvector implementation not yet available")
-	case VectorStoreTypeInMemory:
-		// Create a mock in-memory implementation for testing
-		store, err = &mockVectorStore{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported vector store type: %s", f.config.Type)
-	}
-
+func (f *VectorConnectionFactory) CreateConnection(ctx context.Context) (schema.Connection, error) {
+	store, err := vector.NewVectorStore(f.config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vector store: %w", err)
 	}
@@ -507,7 +472,7 @@ func (f *VectorConnectionFactory) CreateConnection(ctx context.Context) (Connect
 }
 
 // ValidateConnection validates a vector connection
-func (f *VectorConnectionFactory) ValidateConnection(ctx context.Context, conn Connection) error {
+func (f *VectorConnectionFactory) ValidateConnection(ctx context.Context, conn schema.Connection) error {
 	vectorConn, ok := conn.(*VectorConnection)
 	if !ok {
 		return fmt.Errorf("invalid connection type for vector store")
@@ -524,6 +489,7 @@ type PooledStorageManager struct {
 	healthMonitor  *HealthMonitor
 	config         *StorageConfig
 	mu             sync.RWMutex
+	closed         bool
 }
 
 // NewPooledStorageManager creates a new pooled storage manager
@@ -547,7 +513,7 @@ func NewPooledStorageManager(config *StorageConfig) (*PooledStorageManager, erro
 }
 
 // GetRelationalConnection gets a connection from the relational pool
-func (m *PooledStorageManager) GetRelationalConnection(ctx context.Context) (Connection, error) {
+func (m *PooledStorageManager) GetRelationalConnection(ctx context.Context) (schema.Connection, error) {
 	if m.relationalPool == nil {
 		return nil, fmt.Errorf("relational connection pool not initialized")
 	}
@@ -556,7 +522,7 @@ func (m *PooledStorageManager) GetRelationalConnection(ctx context.Context) (Con
 }
 
 // PutRelationalConnection returns a connection to the relational pool
-func (m *PooledStorageManager) PutRelationalConnection(conn Connection) error {
+func (m *PooledStorageManager) PutRelationalConnection(conn schema.Connection) error {
 	if m.relationalPool == nil {
 		return fmt.Errorf("relational connection pool not initialized")
 	}
@@ -565,7 +531,7 @@ func (m *PooledStorageManager) PutRelationalConnection(conn Connection) error {
 }
 
 // GetGraphConnection gets a connection from the graph pool
-func (m *PooledStorageManager) GetGraphConnection(ctx context.Context) (Connection, error) {
+func (m *PooledStorageManager) GetGraphConnection(ctx context.Context) (schema.Connection, error) {
 	if m.graphPool == nil {
 		return nil, fmt.Errorf("graph connection pool not initialized")
 	}
@@ -574,7 +540,7 @@ func (m *PooledStorageManager) GetGraphConnection(ctx context.Context) (Connecti
 }
 
 // PutGraphConnection returns a connection to the graph pool
-func (m *PooledStorageManager) PutGraphConnection(conn Connection) error {
+func (m *PooledStorageManager) PutGraphConnection(conn schema.Connection) error {
 	if m.graphPool == nil {
 		return fmt.Errorf("graph connection pool not initialized")
 	}
@@ -583,7 +549,7 @@ func (m *PooledStorageManager) PutGraphConnection(conn Connection) error {
 }
 
 // GetVectorConnection gets a connection from the vector pool
-func (m *PooledStorageManager) GetVectorConnection(ctx context.Context) (Connection, error) {
+func (m *PooledStorageManager) GetVectorConnection(ctx context.Context) (schema.Connection, error) {
 	if m.vectorPool == nil {
 		return nil, fmt.Errorf("vector connection pool not initialized")
 	}
@@ -592,7 +558,7 @@ func (m *PooledStorageManager) GetVectorConnection(ctx context.Context) (Connect
 }
 
 // PutVectorConnection returns a connection to the vector pool
-func (m *PooledStorageManager) PutVectorConnection(conn Connection) error {
+func (m *PooledStorageManager) PutVectorConnection(conn schema.Connection) error {
 	if m.vectorPool == nil {
 		return fmt.Errorf("vector connection pool not initialized")
 	}
@@ -607,11 +573,26 @@ func (m *PooledStorageManager) GetHealthReport(ctx context.Context) *HealthRepor
 
 // IsHealthy returns true if all storage backends are healthy
 func (m *PooledStorageManager) IsHealthy() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.closed {
+		return false
+	}
+
 	return m.healthMonitor.IsHealthy()
 }
 
 // Close closes all connection pools and stops health monitoring
 func (m *PooledStorageManager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return nil
+	}
+	m.closed = true
+
 	var errors []error
 
 	// Stop health monitoring
@@ -661,7 +642,7 @@ func (m *PooledStorageManager) initializePools() error {
 			ValidateOnGet:         true,
 		}
 
-		var factory ConnectionFactory
+		var factory schema.ConnectionFactory
 		switch m.config.Relational.Type {
 		case StorageTypePostgreSQL:
 			factory = NewPostgreSQLConnectionFactory(m.config.Relational)

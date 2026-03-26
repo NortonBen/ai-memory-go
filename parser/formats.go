@@ -9,23 +9,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // FormatParser implements parsing for common file formats (TXT, CSV, JSON)
 type FormatParser struct {
-	config *ChunkingConfig
+	config *schema.ChunkingConfig
 }
 
 // NewFormatParser creates a new format parser
-func NewFormatParser(config *ChunkingConfig) *FormatParser {
+func NewFormatParser(config *schema.ChunkingConfig) *FormatParser {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 	return &FormatParser{config: config}
 }
 
 // ParseTXT parses plain text files
-func (fp *FormatParser) ParseTXT(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fp *FormatParser) ParseTXT(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read TXT file: %w", err)
@@ -59,7 +61,7 @@ func (fp *FormatParser) ParseTXT(ctx context.Context, filePath string) ([]Chunk,
 }
 
 // ParseCSV parses CSV files and converts each row to a chunk
-func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open CSV file: %w", err)
@@ -76,7 +78,7 @@ func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk,
 	}
 
 	if len(records) == 0 {
-		return []Chunk{}, nil
+		return []*schema.Chunk{}, nil
 	}
 
 	// Create base metadata
@@ -102,7 +104,7 @@ func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk,
 		}
 	}
 
-	chunks := make([]Chunk, 0)
+	chunks := make([]*schema.Chunk, 0)
 
 	// Convert each data row to a chunk
 	for i := startRow; i < len(records); i++ {
@@ -127,7 +129,7 @@ func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk,
 
 		content := strings.Join(contentParts, "\n")
 		
-		chunk := NewChunk(content, filePath, ChunkTypeText)
+		chunk := NewChunk(content, filePath, schema.ChunkTypeText)
 		
 		// Add CSV-specific metadata
 		for k, v := range metadata {
@@ -137,14 +139,14 @@ func (fp *FormatParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk,
 		chunk.Metadata["row_data"] = rowData
 		chunk.Metadata["chunk_type"] = "csv_row"
 
-		chunks = append(chunks, *chunk)
+		chunks = append(chunks, chunk)
 	}
 
 	return chunks, nil
 }
 
 // ParseJSON parses JSON files and converts them to chunks
-func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read JSON file: %w", err)
@@ -164,7 +166,7 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 		"file_size": len(content),
 	}
 
-	chunks := make([]Chunk, 0)
+	chunks := make([]*schema.Chunk, 0)
 
 	// Handle different JSON structures
 	switch data := jsonData.(type) {
@@ -185,7 +187,7 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 				continue
 			}
 
-			chunk := NewChunk(string(itemJSON), filePath, ChunkTypeText)
+			chunk := NewChunk(string(itemJSON), filePath, schema.ChunkTypeText)
 			
 			// Add JSON-specific metadata
 			for k, v := range metadata {
@@ -194,7 +196,7 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 			chunk.Metadata["array_index"] = i
 			chunk.Metadata["chunk_type"] = "json_array_item"
 
-			chunks = append(chunks, *chunk)
+			chunks = append(chunks, chunk)
 		}
 
 	case map[string]interface{}:
@@ -204,14 +206,14 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 		// If it's a simple object, create one chunk
 		if fp.isSimpleObject(data) {
 			content := string(content)
-			chunk := NewChunk(content, filePath, ChunkTypeText)
+			chunk := NewChunk(content, filePath, schema.ChunkTypeText)
 			
 			for k, v := range metadata {
 				chunk.Metadata[k] = v
 			}
 			chunk.Metadata["chunk_type"] = "json_object"
 			
-			chunks = append(chunks, *chunk)
+			chunks = append(chunks, chunk)
 		} else {
 			// Complex object - chunk by top-level properties
 			for key, value := range data {
@@ -227,7 +229,7 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 				}
 
 				content := fmt.Sprintf("{\n  \"%s\": %s\n}", key, string(valueJSON))
-				chunk := NewChunk(content, filePath, ChunkTypeText)
+				chunk := NewChunk(content, filePath, schema.ChunkTypeText)
 				
 				// Add JSON-specific metadata
 				for k, v := range metadata {
@@ -236,21 +238,21 @@ func (fp *FormatParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk
 				chunk.Metadata["property_name"] = key
 				chunk.Metadata["chunk_type"] = "json_property"
 
-				chunks = append(chunks, *chunk)
+				chunks = append(chunks, chunk)
 			}
 		}
 
 	default:
 		// Simple JSON value - create single chunk
 		metadata["json_type"] = "primitive"
-		chunk := NewChunk(string(content), filePath, ChunkTypeText)
+		chunk := NewChunk(string(content), filePath, schema.ChunkTypeText)
 		
 		for k, v := range metadata {
 			chunk.Metadata[k] = v
 		}
 		chunk.Metadata["chunk_type"] = "json_primitive"
 		
-		chunks = append(chunks, *chunk)
+		chunks = append(chunks, chunk)
 	}
 
 	return chunks, nil
@@ -331,19 +333,19 @@ func (fp *FormatParser) isSimpleObject(obj map[string]interface{}) bool {
 }
 
 // DetectContentType detects the type of content
-func (fp *FormatParser) DetectContentType(content string) ChunkType {
+func (fp *FormatParser) DetectContentType(content string) schema.ChunkType {
 	// Simple heuristics for content type detection
 	if strings.Contains(content, "```") || strings.Contains(content, "func ") || strings.Contains(content, "class ") {
-		return ChunkTypeCode
+		return schema.ChunkTypeCode
 	}
 	if strings.Contains(content, "#") && strings.Contains(content, "\n") {
-		return ChunkTypeMarkdown
+		return schema.ChunkTypeMarkdown
 	}
-	return ChunkTypeText
+	return schema.ChunkTypeText
 }
 
 // ParseFile parses a file based on its extension
-func (fp *FormatParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fp *FormatParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	format := DetectFileFormat(filePath)
 	
 	switch format {
@@ -360,21 +362,21 @@ func (fp *FormatParser) ParseFile(ctx context.Context, filePath string) ([]Chunk
 }
 
 // ParseText parses raw text content into chunks
-func (fp *FormatParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (fp *FormatParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	// Use text parser for chunking
 	textParser := NewTextParser(fp.config)
 	return textParser.ParseText(ctx, content)
 }
 
 // ParseMarkdown parses markdown content with structure preservation
-func (fp *FormatParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (fp *FormatParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	// Use text parser for markdown
 	textParser := NewTextParser(fp.config)
 	return textParser.ParseMarkdown(ctx, content)
 }
 
 // ParsePDF parses PDF files (not supported by FormatParser)
-func (fp *FormatParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
+func (fp *FormatParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return nil, fmt.Errorf("PDF parsing not supported by FormatParser, use PDFParser instead")
 }
 func DetectFileFormat(filePath string) string {

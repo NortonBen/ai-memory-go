@@ -7,15 +7,17 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ConnectionPool defines the interface for connection pooling
 type ConnectionPool interface {
 	// Get a connection from the pool
-	Get(ctx context.Context) (Connection, error)
+	Get(ctx context.Context) (schema.Connection, error)
 
 	// Put a connection back to the pool
-	Put(conn Connection) error
+	Put(conn schema.Connection) error
 
 	// Close all connections in the pool
 	Close() error
@@ -25,24 +27,6 @@ type ConnectionPool interface {
 
 	// Health check for the pool
 	Health(ctx context.Context) error
-}
-
-// Connection represents a generic connection interface
-type Connection interface {
-	// Ping tests the connection
-	Ping(ctx context.Context) error
-
-	// Close closes the connection
-	Close() error
-
-	// IsValid checks if connection is still valid
-	IsValid() bool
-
-	// LastUsed returns when connection was last used
-	LastUsed() time.Time
-
-	// SetLastUsed updates the last used time
-	SetLastUsed(t time.Time)
 }
 
 // PoolStats provides statistics about connection pool usage
@@ -120,20 +104,15 @@ func DefaultPoolConfig() *PoolConfig {
 	}
 }
 
-// ConnectionFactory creates new connections
-type ConnectionFactory interface {
-	CreateConnection(ctx context.Context) (Connection, error)
-	ValidateConnection(ctx context.Context, conn Connection) error
-}
 
 // GenericConnectionPool implements ConnectionPool interface
 type GenericConnectionPool struct {
-	factory ConnectionFactory
+	factory schema.ConnectionFactory
 	config  *PoolConfig
 
 	// Pool state
-	connections chan Connection
-	active      map[Connection]time.Time
+	connections chan schema.Connection
+	active      map[schema.Connection]time.Time
 	stats       *PoolStats
 
 	// Synchronization
@@ -144,7 +123,7 @@ type GenericConnectionPool struct {
 }
 
 // NewGenericConnectionPool creates a new connection pool
-func NewGenericConnectionPool(factory ConnectionFactory, config *PoolConfig) (*GenericConnectionPool, error) {
+func NewGenericConnectionPool(factory schema.ConnectionFactory, config *PoolConfig) (*GenericConnectionPool, error) {
 	if config == nil {
 		config = DefaultPoolConfig()
 	}
@@ -164,8 +143,8 @@ func NewGenericConnectionPool(factory ConnectionFactory, config *PoolConfig) (*G
 	pool := &GenericConnectionPool{
 		factory:     factory,
 		config:      config,
-		connections: make(chan Connection, config.MaxConnections),
-		active:      make(map[Connection]time.Time),
+		connections: make(chan schema.Connection, config.MaxConnections),
+		active:      make(map[schema.Connection]time.Time),
 		stats: &PoolStats{
 			CreatedAt:   time.Now(),
 			LastUpdated: time.Now(),
@@ -200,7 +179,7 @@ func NewGenericConnectionPool(factory ConnectionFactory, config *PoolConfig) (*G
 }
 
 // Get retrieves a connection from the pool
-func (p *GenericConnectionPool) Get(ctx context.Context) (Connection, error) {
+func (p *GenericConnectionPool) Get(ctx context.Context) (schema.Connection, error) {
 	if atomic.LoadInt32(&p.closed) == 1 {
 		return nil, fmt.Errorf("connection pool is closed")
 	}
@@ -236,7 +215,7 @@ func (p *GenericConnectionPool) Get(ctx context.Context) (Connection, error) {
 }
 
 // Put returns a connection to the pool
-func (p *GenericConnectionPool) Put(conn Connection) error {
+func (p *GenericConnectionPool) Put(conn schema.Connection) error {
 	if atomic.LoadInt32(&p.closed) == 1 {
 		conn.Close()
 		return fmt.Errorf("connection pool is closed")
@@ -262,7 +241,7 @@ func (p *GenericConnectionPool) Put(conn Connection) error {
 	}
 
 	// Check if connection is still valid and not expired
-	if !conn.IsValid() || p.isConnectionExpired(conn) {
+	if !conn.IsValid() || p.ConnectionExpired(conn) {
 		conn.Close()
 		atomic.AddInt64(&p.stats.ConnectionsClosed, 1)
 		return nil
@@ -304,7 +283,7 @@ func (p *GenericConnectionPool) Close() error {
 		conn.Close()
 		atomic.AddInt64(&p.stats.ConnectionsClosed, 1)
 	}
-	p.active = make(map[Connection]time.Time)
+	p.active = make(map[schema.Connection]time.Time)
 	p.mu.Unlock()
 
 	// Reset counters
@@ -354,7 +333,7 @@ func (p *GenericConnectionPool) Health(ctx context.Context) error {
 
 // Private helper methods
 
-func (p *GenericConnectionPool) createConnection(ctx context.Context) (Connection, error) {
+func (p *GenericConnectionPool) createConnection(ctx context.Context) (schema.Connection, error) {
 	conn, err := p.factory.CreateConnection(ctx)
 	if err != nil {
 		atomic.AddInt64(&p.stats.ConnectionsFailed, 1)
@@ -367,23 +346,50 @@ func (p *GenericConnectionPool) createConnection(ctx context.Context) (Connectio
 	return conn, nil
 }
 
-func (p *GenericConnectionPool) createAndTrackConnection(ctx context.Context) (Connection, error) {
-	// Check if we can create more connections
-	if atomic.LoadInt32(&p.stats.TotalConnections) >= int32(p.config.MaxConnections) {
-		// Wait for a connection to become available
-		select {
-		case conn := <-p.connections:
-			atomic.AddInt32(&p.stats.IdleConnections, -1)
+func (p *GenericConnectionPool) createAndTrackConnection(ctx context.Context) (schema.Connection, error) {
+	// Attempt to reserve a connection slot
+	for {
+		total := atomic.LoadInt32(&p.stats.TotalConnections)
+		if total >= int32(p.config.MaxConnections) {
+			// Wait for a connection to become available
+			select {
+			case conn := <-p.connections:
+				atomic.AddInt32(&p.stats.IdleConnections, -1)
 
-			if p.config.ValidateOnGet {
-				if err := p.validateConnection(ctx, conn); err != nil {
-					conn.Close()
-					atomic.AddInt64(&p.stats.ConnectionsClosed, 1)
-					atomic.AddInt32(&p.stats.TotalConnections, -1)
-					return p.createAndTrackConnection(ctx) // Retry
+				if p.config.ValidateOnGet {
+					if err := p.validateConnection(ctx, conn); err != nil {
+						conn.Close()
+						atomic.AddInt64(&p.stats.ConnectionsClosed, 1)
+						atomic.AddInt32(&p.stats.TotalConnections, -1)
+						return p.createAndTrackConnection(ctx) // Retry
+					}
 				}
+
+				p.mu.Lock()
+				p.active[conn] = time.Now()
+				atomic.AddInt32(&p.stats.ActiveConnections, 1)
+				p.mu.Unlock()
+
+				conn.SetLastUsed(time.Now())
+				return conn, nil
+
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		// Try to increment TotalConnections
+		if atomic.CompareAndSwapInt32(&p.stats.TotalConnections, total, total+1) {
+			// Slot reserved! Create new connection
+			conn, err := p.factory.CreateConnection(ctx)
+			if err != nil {
+				atomic.AddInt32(&p.stats.TotalConnections, -1)
+				return nil, err
 			}
 
+			atomic.AddInt64(&p.stats.ConnectionsCreated, 1)
+
+			// Track as active
 			p.mu.Lock()
 			p.active[conn] = time.Now()
 			atomic.AddInt32(&p.stats.ActiveConnections, 1)
@@ -391,34 +397,17 @@ func (p *GenericConnectionPool) createAndTrackConnection(ctx context.Context) (C
 
 			conn.SetLastUsed(time.Now())
 			return conn, nil
-
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		}
+		// If CAS failed, someone else changed TotalConnections, loop and try again
 	}
-
-	// Create new connection
-	conn, err := p.createConnection(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Track as active
-	p.mu.Lock()
-	p.active[conn] = time.Now()
-	atomic.AddInt32(&p.stats.ActiveConnections, 1)
-	p.mu.Unlock()
-
-	conn.SetLastUsed(time.Now())
-	return conn, nil
 }
 
-func (p *GenericConnectionPool) validateConnection(ctx context.Context, conn Connection) error {
+func (p *GenericConnectionPool) validateConnection(ctx context.Context, conn schema.Connection) error {
 	if !conn.IsValid() {
 		return fmt.Errorf("connection is not valid")
 	}
 
-	if p.isConnectionExpired(conn) {
+	if p.ConnectionExpired(conn) {
 		return fmt.Errorf("connection is expired")
 	}
 
@@ -429,7 +418,7 @@ func (p *GenericConnectionPool) validateConnection(ctx context.Context, conn Con
 	return nil
 }
 
-func (p *GenericConnectionPool) isConnectionExpired(conn Connection) bool {
+func (p *GenericConnectionPool) ConnectionExpired(conn schema.Connection) bool {
 	if p.config.MaxConnectionLifetime <= 0 {
 		return false
 	}
@@ -462,14 +451,14 @@ func (p *GenericConnectionPool) maintenanceLoop() {
 
 func (p *GenericConnectionPool) cleanupIdleConnections() {
 	// Clean up expired idle connections
-	var connectionsToClose []Connection
+	var connectionsToClose []schema.Connection
 
 	// Collect expired connections
 loop:
 	for {
 		select {
 		case conn := <-p.connections:
-			if p.isConnectionExpired(conn) || !conn.IsValid() {
+			if p.ConnectionExpired(conn) || !conn.IsValid() {
 				connectionsToClose = append(connectionsToClose, conn)
 				atomic.AddInt32(&p.stats.IdleConnections, -1)
 			} else {
@@ -539,8 +528,8 @@ func (p *GenericConnectionPool) performHealthCheck() {
 	defer cancel()
 
 	// Check a sample of idle connections
-	var connectionsToTest []Connection
-	var connectionsToReturn []Connection
+	var connectionsToTest []schema.Connection
+	var connectionsToReturn []schema.Connection
 
 	// Get up to 3 connections for testing
 	for i := 0; i < 3; i++ {

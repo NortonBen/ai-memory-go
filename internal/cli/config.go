@@ -9,8 +9,11 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/storage"
+	_ "github.com/NortonBen/ai-memory-go/storage/adapters/postgresql"
+	_ "github.com/NortonBen/ai-memory-go/storage/adapters/sqlite"
 	"github.com/NortonBen/ai-memory-go/vector"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -128,7 +131,7 @@ func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
 		embDim = 768
 	}
 
-	embFactory := extractor.NewEmbeddingProviderFactory()
+	embFactory := registry.NewEmbeddingProviderFactory()
 	embConfig := &extractor.EmbeddingProviderConfig{
 		Type:       extractor.EmbeddingProviderType(embProviderStr),
 		Endpoint:   embEndpoint,
@@ -160,7 +163,7 @@ func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
 			Password: viper.GetString("db.neo4j.password"),
 			Database: viper.GetString("db.neo4j.database"),
 		}
-		graphStore, err = graph.NewNeo4jStore(cfg)
+		graphStore, err = graph.NewNeo4jStore(cfg.Host, cfg.Username, cfg.Password)
 	} else {
 		graphStore, err = graph.NewSQLiteGraphStore(filepath.Join(dataDir, "graph.db"))
 	}
@@ -202,6 +205,7 @@ func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
 
 	var relStore storage.RelationalStore
 	relStore, err = storage.NewSQLiteAdapter(&storage.RelationalConfig{
+		Type:        storage.StorageTypeSQLite,
 		Database:    filepath.Join(dataDir, "rel.db"),
 		ConnTimeout: 5 * time.Second,
 	})
@@ -215,7 +219,7 @@ func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
 	llmModel := viper.GetString("llm.model")
 	llmApiKey := viper.GetString("llm.api_key")
 
-	llmFactory := extractor.NewProviderFactory()
+	llmFactory := registry.NewProviderFactory()
 	llmConfig := &extractor.ProviderConfig{
 		Type:     extractor.ProviderType(llmProviderStr),
 		Endpoint: llmEndpoint,

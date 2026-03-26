@@ -9,6 +9,7 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/storage"
 	"github.com/NortonBen/ai-memory-go/vector"
@@ -31,13 +32,26 @@ func main() {
 		embeddingsModel = "text-embedding-nomic-embed-text-v1.5"
 	}
 
-	provider, err := extractor.NewLMStudioProvider(lmStudioURL, modelName)
+	llmFactory := registry.NewProviderFactory()
+	provider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:     extractor.ProviderLMStudio,
+		Endpoint: lmStudioURL,
+		Model:    modelName,
+	})
 	if err != nil {
 		log.Fatalf("Failed to create provider: %v", err)
 	}
 	ext := extractor.NewBasicExtractor(provider, nil)
 
-	emb := vector.NewLMStudioEmbeddingProvider(lmStudioURL, embeddingsModel)
+	embFactory := registry.NewEmbeddingProviderFactory()
+	emb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:     extractor.EmbeddingProviderLMStudio,
+		Endpoint: lmStudioURL,
+		Model:    embeddingsModel,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create embedding provider: %v", err)
+	}
 
 	graphDBPath := "./data/consistency_reasoning/consistency_graph.db"
 	vectorDBPath := "./data/consistency_reasoning/consistency_vector.db"

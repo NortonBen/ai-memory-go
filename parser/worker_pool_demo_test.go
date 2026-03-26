@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,7 @@ func TestWorkerPoolDemo(t *testing.T) {
 		RetryDelay:    100 * time.Millisecond,
 	}
 
-	parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+	parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 	defer parser.Close()
 
 	fmt.Printf("Configured worker pool with %d workers\n", config.NumWorkers)
@@ -76,12 +77,12 @@ func TestWorkerPoolDemo(t *testing.T) {
 	fmt.Printf("\n=== Performance Comparison ===\n")
 
 	// Sequential processing
-	sequentialParser := NewUnifiedParser(DefaultChunkingConfig())
+	sequentialParser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer sequentialParser.Close()
 
 	fmt.Printf("Processing same files sequentially...\n")
 	startTime = time.Now()
-	sequentialResults := make(map[string][]Chunk)
+	sequentialResults := make(map[string][]*schema.Chunk)
 	for _, filePath := range testFiles {
 		chunks, err := sequentialParser.ParseFile(ctx, filePath)
 		require.NoError(t, err)

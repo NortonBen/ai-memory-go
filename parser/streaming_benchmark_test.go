@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // BenchmarkStreamingParserMemoryEfficiency tests memory usage with different file sizes
@@ -136,15 +138,15 @@ func BenchmarkStreamingParserChunkSizes(b *testing.B) {
 func BenchmarkStreamingParserStrategies(b *testing.B) {
 	content := generateLargeTestContent(2000)
 
-	strategies := []ChunkingStrategy{
-		StrategyParagraph,
-		StrategySentence,
-		StrategyFixedSize,
+	strategies := []schema.ChunkingStrategy{
+		schema.StrategyParagraph,
+		schema.StrategySentence,
+		schema.StrategyFixedSize,
 	}
 
 	for _, strategy := range strategies {
 		b.Run(string(strategy), func(b *testing.B) {
-			chunkConfig := &ChunkingConfig{
+			chunkConfig := &schema.ChunkingConfig{
 				Strategy: strategy,
 				MaxSize:  1000,
 				MinSize:  100,

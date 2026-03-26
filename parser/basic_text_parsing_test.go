@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // TestParserInterface_ParseText tests the core ParseText functionality
@@ -12,56 +14,56 @@ func TestParserInterface_ParseText(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
-		strategy ChunkingStrategy
+		strategy schema.ChunkingStrategy
 		expected int // expected number of chunks
 	}{
 		{
 			name:     "Simple paragraph text",
 			content:  "This is the first paragraph.\n\nThis is the second paragraph.\n\nThis is the third paragraph.",
-			strategy: StrategyParagraph,
+			strategy: schema.StrategyParagraph,
 			expected: 1, // Will be combined into one chunk due to size constraints
 		},
 		{
 			name:     "Single paragraph",
 			content:  "This is a single paragraph with multiple sentences. It should create one chunk.",
-			strategy: StrategyParagraph,
+			strategy: schema.StrategyParagraph,
 			expected: 1,
 		},
 		{
 			name:     "Sentence chunking",
 			content:  "First sentence. Second sentence! Third sentence? Fourth sentence.",
-			strategy: StrategySentence,
+			strategy: schema.StrategySentence,
 			expected: 1, // Will be combined into one chunk due to size constraints
 		},
 		{
 			name:     "Large paragraph text for chunking",
 			content:  strings.Repeat("This is a paragraph with enough content to trigger chunking. ", 20) + "\n\n" + strings.Repeat("This is another paragraph with enough content. ", 20) + "\n\n" + strings.Repeat("This is the third paragraph with sufficient content. ", 20),
-			strategy: StrategyParagraph,
+			strategy: schema.StrategyParagraph,
 			expected: 3, // Should create multiple chunks due to size
 		},
 		{
 			name:     "Fixed size chunking",
 			content:  strings.Repeat("a", 2500), // 2500 characters
-			strategy: StrategyFixedSize,
+			strategy: schema.StrategyFixedSize,
 			expected: 3, // With default max size 1000 and overlap 100
 		},
 		{
 			name:     "Empty content",
 			content:  "",
-			strategy: StrategyParagraph,
+			strategy: schema.StrategyParagraph,
 			expected: 0,
 		},
 		{
 			name:     "Whitespace only",
 			content:  "   \n\n   \t\t   \n   ",
-			strategy: StrategyParagraph,
+			strategy: schema.StrategyParagraph,
 			expected: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &ChunkingConfig{
+			config := &schema.ChunkingConfig{
 				Strategy:          tt.strategy,
 				MaxSize:           1000,
 				Overlap:           100,
@@ -89,11 +91,11 @@ func TestParserInterface_ParseText(t *testing.T) {
 				if chunk.Hash == "" {
 					t.Errorf("Chunk %d has empty hash", i)
 				}
-				if chunk.Type != ChunkTypeParagraph && chunk.Type != ChunkTypeSentence && chunk.Type != ChunkTypeText {
+				if chunk.Type != schema.ChunkTypeParagraph && chunk.Type != schema.ChunkTypeSentence && chunk.Type != schema.ChunkTypeText {
 					t.Errorf("Chunk %d has invalid type: %s", i, chunk.Type)
 				}
 				if chunk.CreatedAt.IsZero() {
-					t.Errorf("Chunk %d has zero CreatedAt time", i)
+					t.Errorf("Chunk %d has zero Timestamp time", i)
 				}
 			}
 		})
@@ -105,36 +107,36 @@ func TestParserInterface_DetectContentType(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
-		expected ChunkType
+		expected schema.ChunkType
 	}{
 		{
 			name:     "Go code",
 			content:  "package main\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}",
-			expected: ChunkTypeCode,
+			expected: schema.ChunkTypeCode,
 		},
 		{
 			name:     "Python code",
 			content:  "def hello():\n    print(\"Hello, World!\")\n\nif __name__ == \"__main__\":\n    hello()",
-			expected: ChunkTypeCode,
+			expected: schema.ChunkTypeCode,
 		},
 		{
 			name:     "Markdown content",
 			content:  "# Title\n\nThis is a **bold** text with [link](http://example.com).",
-			expected: ChunkTypeMarkdown,
+			expected: schema.ChunkTypeMarkdown,
 		},
 		{
 			name:     "Plain text",
 			content:  "This is just plain text without any special formatting or code.",
-			expected: ChunkTypeText,
+			expected: schema.ChunkTypeText,
 		},
 		{
 			name:     "Empty content",
 			content:  "",
-			expected: ChunkTypeText,
+			expected: schema.ChunkTypeText,
 		},
 	}
 
-	parser := NewTextParser(DefaultChunkingConfig())
+	parser := NewTextParser(schema.DefaultChunkingConfig())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,19 +163,19 @@ Here we have another section with different content. The content is structured i
 Final paragraph with some code: func main() { fmt.Println("Hello") }`
 
 	strategies := []struct {
-		name      ChunkingStrategy
+		name      schema.ChunkingStrategy
 		minChunks int
 		maxChunks int
 	}{
-		{StrategyParagraph, 1, 3},
-		{StrategySentence, 1, 8},
-		{StrategyFixedSize, 1, 5},
-		{StrategySemantic, 1, 3}, // Falls back to paragraph
+		{schema.StrategyParagraph, 1, 3},
+		{schema.StrategySentence, 1, 8},
+		{schema.StrategyFixedSize, 1, 5},
+		{schema.StrategySemantic, 1, 3}, // Falls back to paragraph
 	}
 
 	for _, strategy := range strategies {
 		t.Run(string(strategy.name), func(t *testing.T) {
-			config := &ChunkingConfig{
+			config := &schema.ChunkingConfig{
 				Strategy:          strategy.name,
 				MaxSize:           500,
 				Overlap:           50,
@@ -207,12 +209,12 @@ Final paragraph with some code: func main() { fmt.Println("Hello") }`
 // TestDeduplication_Basic tests basic deduplication functionality
 func TestDeduplication_Basic(t *testing.T) {
 	// Create chunks with some duplicates
-	chunks := []Chunk{
-		*NewChunk("This is unique content 1", "test", ChunkTypeText),
-		*NewChunk("This is unique content 2", "test", ChunkTypeText),
-		*NewChunk("This is unique content 1", "test", ChunkTypeText), // Duplicate
-		*NewChunk("This is unique content 3", "test", ChunkTypeText),
-		*NewChunk("This is unique content 2", "test", ChunkTypeText), // Duplicate
+	chunks := []*schema.Chunk{
+		schema.NewChunk("This is unique content 1", "test", schema.ChunkTypeText),
+		schema.NewChunk("This is unique content 2", "test", schema.ChunkTypeText),
+		schema.NewChunk("This is unique content 1", "test", schema.ChunkTypeText), // Duplicate
+		schema.NewChunk("This is unique content 3", "test", schema.ChunkTypeText),
+		schema.NewChunk("This is unique content 2", "test", schema.ChunkTypeText), // Duplicate
 	}
 
 	// Test global deduplication
@@ -274,7 +276,7 @@ It contains various elements that should be extracted.`
 
 // TestChunkEnrichment tests chunk metadata enrichment
 func TestChunkEnrichment(t *testing.T) {
-	chunk := NewChunk("This is test content for enrichment", "test.txt", ChunkTypeText)
+	chunk := schema.NewChunk("This is test content for enrichment", "test.txt", schema.ChunkTypeText)
 
 	// Enrich the chunk
 	EnrichChunkMetadata(chunk, "test.txt")
@@ -299,7 +301,7 @@ func TestChunkEnrichment(t *testing.T) {
 
 // TestParserInterface_ErrorHandling tests error handling in parsing
 func TestParserInterface_ErrorHandling(t *testing.T) {
-	parser := NewTextParser(DefaultChunkingConfig())
+	parser := NewTextParser(schema.DefaultChunkingConfig())
 	ctx := context.Background()
 
 	// Test with cancelled context
@@ -331,37 +333,37 @@ func TestContentTypeDetection_Advanced(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
-		expected ChunkType
+		expected schema.ChunkType
 	}{
 		{
 			name:     "Go function",
 			content:  "func TestSomething(t *testing.T) {\n\t// test code\n}",
-			expected: ChunkTypeCode,
+			expected: schema.ChunkTypeCode,
 		},
 		{
 			name:     "Python class",
 			content:  "class MyClass:\n    def __init__(self):\n        pass",
-			expected: ChunkTypeCode,
+			expected: schema.ChunkTypeCode,
 		},
 		{
 			name:     "JavaScript function",
 			content:  "function myFunction() {\n    return 'hello';\n}",
-			expected: ChunkTypeCode,
+			expected: schema.ChunkTypeCode,
 		},
 		{
 			name:     "Markdown with headers",
 			content:  "# Main Title\n\n## Subtitle\n\nSome **bold** text.",
-			expected: ChunkTypeMarkdown,
+			expected: schema.ChunkTypeMarkdown,
 		},
 		{
 			name:     "Markdown with links",
 			content:  "Check out [this link](https://example.com) for more info.",
-			expected: ChunkTypeMarkdown,
+			expected: schema.ChunkTypeMarkdown,
 		},
 		{
 			name:     "Plain text",
 			content:  "This is just regular text without any special formatting.",
-			expected: ChunkTypeText,
+			expected: schema.ChunkTypeText,
 		},
 	}
 

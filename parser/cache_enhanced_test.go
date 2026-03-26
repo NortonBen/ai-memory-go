@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,8 +32,8 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 			largeContent[i] = 'A'
 		}
 
-		chunks := []Chunk{
-			{ID: "1", Content: string(largeContent), Type: ChunkTypeText},
+		chunks := []*schema.Chunk{
+			{ID: "1", Content: string(largeContent), Type: schema.ChunkTypeText},
 		}
 
 		options := &CacheEntryOptions{
@@ -57,9 +58,9 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 
 	// Test tag-based operations
 	t.Run("TagOperations", func(t *testing.T) {
-		chunks1 := []Chunk{{ID: "1", Content: "Tagged content 1", Type: ChunkTypeText}}
-		chunks2 := []Chunk{{ID: "2", Content: "Tagged content 2", Type: ChunkTypeText}}
-		chunks3 := []Chunk{{ID: "3", Content: "Untagged content", Type: ChunkTypeText}}
+		chunks1 := []*schema.Chunk{{ID: "1", Content: "Tagged content 1", Type: schema.ChunkTypeText}}
+		chunks2 := []*schema.Chunk{{ID: "2", Content: "Tagged content 2", Type: schema.ChunkTypeText}}
+		chunks3 := []*schema.Chunk{{ID: "3", Content: "Untagged content", Type: schema.ChunkTypeText}}
 
 		options1 := &CacheEntryOptions{Tags: []string{"category1", "important"}}
 		options2 := &CacheEntryOptions{Tags: []string{"category1", "normal"}}
@@ -98,7 +99,7 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 
 	// Test persistence
 	t.Run("Persistence", func(t *testing.T) {
-		chunks := []Chunk{{ID: "1", Content: "Persistent content", Type: ChunkTypeText}}
+		chunks := []*schema.Chunk{{ID: "1", Content: "Persistent content", Type: schema.ChunkTypeText}}
 
 		err := cache.Set(ctx, "persistent-key", chunks, nil)
 		require.NoError(t, err)
@@ -127,7 +128,7 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 
 	// Test custom TTL
 	t.Run("CustomTTL", func(t *testing.T) {
-		chunks := []Chunk{{ID: "1", Content: "Short TTL content", Type: ChunkTypeText}}
+		chunks := []*schema.Chunk{{ID: "1", Content: "Short TTL content", Type: schema.ChunkTypeText}}
 
 		shortTTL := 50 * time.Millisecond
 		options := &CacheEntryOptions{
@@ -153,7 +154,7 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 	t.Run("SizeInformation", func(t *testing.T) {
 		initialEntries, initialMemory := cache.GetSize()
 
-		chunks := []Chunk{{ID: "1", Content: "Size test content", Type: ChunkTypeText}}
+		chunks := []*schema.Chunk{{ID: "1", Content: "Size test content", Type: schema.ChunkTypeText}}
 		err := cache.Set(ctx, "size-test-key", chunks, nil)
 		require.NoError(t, err)
 
@@ -184,7 +185,7 @@ func TestCachedUnifiedParser_EnhancedIntegration(t *testing.T) {
 	err := os.WriteFile(testFile, []byte(content), 0644)
 	require.NoError(t, err)
 
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	config.MinSize = 10 // Lower minimum size for testing
 	cacheConfig := DefaultCacheConfig()
 	cacheConfig.EnableCompression = true
@@ -247,7 +248,7 @@ func TestCacheConfig_ProductionSettings(t *testing.T) {
 
 	// Test that cache works with production settings
 	ctx := context.Background()
-	chunks := []Chunk{{ID: "1", Content: "Production test", Type: ChunkTypeText}}
+	chunks := []*schema.Chunk{{ID: "1", Content: "Production test", Type: schema.ChunkTypeText}}
 
 	err := cache.Set(ctx, "prod-test", chunks, nil)
 	assert.NoError(t, err)
@@ -266,8 +267,8 @@ func BenchmarkEnhancedCacheOperations(b *testing.B) {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{
-		{ID: "1", Content: "Benchmark enhanced cache content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Benchmark enhanced cache content", Type: schema.ChunkTypeText},
 	}
 
 	b.Run("SetWithOptions", func(b *testing.B) {

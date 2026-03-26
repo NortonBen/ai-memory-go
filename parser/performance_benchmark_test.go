@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // BenchmarkParsingPerformance compares sequential vs parallel processing performance
@@ -30,7 +32,7 @@ func BenchmarkParsingPerformance(b *testing.B) {
 		testFiles := createBenchmarkFiles(b, tempDir, tc.fileCount, tc.fileSize)
 
 		b.Run(fmt.Sprintf("%s_Sequential", tc.name), func(b *testing.B) {
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			b.ResetTimer()
@@ -38,7 +40,7 @@ func BenchmarkParsingPerformance(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				ctx := context.Background()
-				results := make(map[string][]Chunk)
+				results := make(map[string][]*schema.Chunk)
 
 				for _, filePath := range testFiles {
 					chunks, err := parser.ParseFile(ctx, filePath)
@@ -63,7 +65,7 @@ func BenchmarkParsingPerformance(b *testing.B) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			b.ResetTimer()
@@ -101,7 +103,7 @@ func BenchmarkWorkerPoolScaling(b *testing.B) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			b.ResetTimer()
@@ -128,7 +130,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	testFiles := createBenchmarkFiles(b, tempDir, 20, "large")
 
 	b.Run("Sequential_Memory", func(b *testing.B) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		var m1, m2 runtime.MemStats
@@ -139,7 +141,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			ctx := context.Background()
-			results := make(map[string][]Chunk)
+			results := make(map[string][]*schema.Chunk)
 
 			for _, filePath := range testFiles {
 				chunks, err := parser.ParseFile(ctx, filePath)
@@ -166,7 +168,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 			RetryDelay:    100 * time.Millisecond,
 		}
 
-		parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+		parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 		defer parser.Close()
 
 		var m1, m2 runtime.MemStats
@@ -201,14 +203,14 @@ func TestPerformanceComparison(t *testing.T) {
 	testFiles := createBenchmarkFiles(t, tempDir, 20, "medium")
 
 	// Sequential processing
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
 
 	// Measure sequential processing
 	startTime := time.Now()
-	sequentialResults := make(map[string][]Chunk)
+	sequentialResults := make(map[string][]*schema.Chunk)
 	for _, filePath := range testFiles {
 		chunks, err := parser.ParseFile(ctx, filePath)
 		if err != nil {

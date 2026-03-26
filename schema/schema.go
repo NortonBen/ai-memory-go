@@ -4,11 +4,15 @@
 package schema
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
+	"strings"
+	"crypto/sha256"
 	"time"
 )
 
@@ -24,6 +28,18 @@ const (
 	NodeTypeDocument       NodeType = "Document"
 	NodeTypeSession        NodeType = "Session"
 	NodeTypeUser           NodeType = "User"
+)
+
+// ChunkType defines the type of content chunk
+type ChunkType string
+
+const (
+	ChunkTypeText      ChunkType = "text"
+	ChunkTypeParagraph ChunkType = "paragraph"
+	ChunkTypeSentence  ChunkType = "sentence"
+	ChunkTypeMarkdown  ChunkType = "markdown"
+	ChunkTypePDF       ChunkType = "pdf"
+	ChunkTypeCode      ChunkType = "code"
 )
 
 // EdgeType defines the type of relationships between nodes
@@ -97,6 +113,222 @@ type DataPoint struct {
 	ProcessingStatus ProcessingStatus `json:"processing_status"`
 	ErrorMessage     string           `json:"error_message,omitempty"`
 }
+
+// Chunk represents a parsed piece of content with metadata
+type Chunk struct {
+	ID        string                 `json:"id"`
+	Content   string                 `json:"content"`
+	Source    string                 `json:"source"`
+	Type      ChunkType              `json:"type"`
+	Offset    int64                  `json:"offset"`
+	Line      int                    `json:"line"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Hash      string                 `json:"hash"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+// NewChunk creates a new chunk with proper initialization
+func NewChunk(content, source string, chunkType ChunkType) *Chunk {
+	id := GenerateChunkID(content, source)
+	hash := GenerateContentHash(content)
+	
+	return &Chunk{
+		ID:        id,
+		Content:   content,
+		Source:    source,
+		Type:      chunkType,
+		Hash:      hash,
+		Metadata:  make(map[string]interface{}),
+		CreatedAt: time.Now(),
+	}
+}
+
+
+// ChunkingStrategy defines how content should be split into chunks
+type ChunkingStrategy string
+
+const (
+	StrategyParagraph ChunkingStrategy = "paragraph"
+	StrategySentence  ChunkingStrategy = "sentence"
+	StrategyFixedSize ChunkingStrategy = "fixed_size"
+	StrategySemantic  ChunkingStrategy = "semantic"
+)
+
+// ChunkingConfig configures how content is chunked
+type ChunkingConfig struct {
+	Strategy          ChunkingStrategy `json:"strategy"`
+	MaxSize           int              `json:"max_size"`
+	Overlap           int              `json:"overlap"`
+	MinSize           int              `json:"min_size"`
+	PreserveStructure bool             `json:"preserve_structure"`
+}
+
+// DefaultChunkingConfig returns a sensible default configuration
+func DefaultChunkingConfig() *ChunkingConfig {
+	return &ChunkingConfig{
+		Strategy:          StrategyParagraph,
+		MaxSize:           1000,
+		Overlap:           100,
+		MinSize:           50,
+		PreserveStructure: true,
+	}
+}
+
+// WorkerPoolConfig configures the worker pool behavior
+type WorkerPoolConfig struct {
+	NumWorkers    int           `json:"num_workers"`
+	QueueSize     int           `json:"queue_size"`
+	Timeout       time.Duration `json:"timeout"`
+	RetryAttempts int           `json:"retry_attempts"`
+	RetryDelay    time.Duration `json:"retry_delay"`
+}
+
+// DefaultWorkerPoolConfig returns a sensible default configuration
+func DefaultWorkerPoolConfig() *WorkerPoolConfig {
+	return &WorkerPoolConfig{
+		NumWorkers:    runtime.NumCPU(),
+		QueueSize:     100,
+		Timeout:       30 * time.Second,
+		RetryAttempts: 3,
+		RetryDelay:    1 * time.Second,
+	}
+}
+
+// WorkerPoolMetrics tracks performance metrics
+type WorkerPoolMetrics struct {
+	TasksSubmitted        int64         `json:"tasks_submitted"`
+	TasksCompleted        int64         `json:"tasks_completed"`
+	TasksFailed           int64         `json:"tasks_failed"`
+	TasksRetried          int64         `json:"tasks_retried"`
+	TotalProcessingTime   time.Duration `json:"total_processing_time"`
+	AverageProcessingTime time.Duration `json:"average_processing_time"`
+	ActiveWorkers         int           `json:"active_workers"`
+	QueueLength           int           `json:"queue_length"`
+}
+
+// CachePolicy defines different cache eviction policies
+type CachePolicy string
+
+const (
+	PolicyLRU  CachePolicy = "lru"  // Least Recently Used
+	PolicyLFU  CachePolicy = "lfu"  // Least Frequently Used
+	PolicyTTL  CachePolicy = "ttl"  // Time To Live based
+	PolicyFIFO CachePolicy = "fifo" // First In First Out
+)
+
+// CacheConfig configures the parser cache
+type CacheConfig struct {
+	Enabled                 bool          `json:"enabled"`
+	MaxSize                 int           `json:"max_size"`
+	MaxMemoryMB             int64         `json:"max_memory_mb"`
+	TTL                     time.Duration `json:"ttl"`
+	Policy                  CachePolicy   `json:"policy"`
+	EnablePersistence       bool          `json:"enable_persistence"`
+	PersistencePath         string        `json:"persistence_path"`
+	CheckFileModTime        bool          `json:"check_file_mod_time"`
+	EnableMetrics           bool          `json:"enable_metrics"`
+	CleanupInterval         time.Duration `json:"cleanup_interval"`
+	EnableCompression       bool          `json:"enable_compression"`
+	CompressionThreshold    int           `json:"compression_threshold"`
+	EnableAsyncPersistence  bool          `json:"enable_async_persistence"`
+	PersistenceInterval     time.Duration `json:"persistence_interval"`
+	EnableWarmup            bool          `json:"enable_warmup"`
+	WarmupFiles             []string      `json:"warmup_files"`
+	MaxConcurrentOperations int           `json:"max_concurrent_operations"`
+	EnableDistributedCache  bool          `json:"enable_distributed_cache"`
+}
+
+// DefaultCacheConfig returns a default cache configuration
+func DefaultCacheConfig() *CacheConfig {
+	return &CacheConfig{
+		Enabled:                 true,
+		MaxSize:                 1000,
+		MaxMemoryMB:             100,
+		TTL:                     24 * time.Hour,
+		Policy:                  "lru",
+		EnablePersistence:       false,
+		PersistencePath:         ".cache/parser_cache.json",
+		CheckFileModTime:        true,
+		EnableMetrics:           true,
+		CleanupInterval:         5 * time.Minute,
+		EnableCompression:       true,
+		CompressionThreshold:    1024,
+		EnableAsyncPersistence:  true,
+		PersistenceInterval:     10 * time.Minute,
+		EnableWarmup:            false,
+		WarmupFiles:             []string{},
+		MaxConcurrentOperations: 100,
+		EnableDistributedCache:  false,
+	}
+}
+
+// CacheMetrics holds metrics for the parser cache
+type CacheMetrics struct {
+	Mu                      sync.RWMutex
+	Hits                    int64         `json:"hits"`
+	Misses                  int64         `json:"misses"`
+	HitRate                 float64       `json:"hit_rate"`
+	Evictions               int64         `json:"evictions"`
+	TotalEntries            int64         `json:"total_entries"`
+	MemoryUsageBytes        int64         `json:"memory_usage_bytes"`
+	AverageAccessTime       time.Duration `json:"average_access_time"`
+	LastCleanup             time.Time     `json:"last_cleanup"`
+	CompressionRatio        float64       `json:"compression_ratio"`
+	PersistenceOperations   int64         `json:"persistence_operations"`
+	LastPersistence         time.Time     `json:"last_persistence"`
+	ConcurrentOperations    int64         `json:"concurrent_operations"`
+	MaxConcurrentOperations int64         `json:"max_concurrent_operations"`
+	WarmupTime              time.Duration `json:"warmup_time"`
+	ErrorCount              int64         `json:"error_count"`
+}
+
+// StreamingConfig configures streaming parser behavior
+type StreamingConfig struct {
+	BufferSize             int           `json:"buffer_size"`
+	ChunkOverlap           int           `json:"chunk_overlap"`
+	MaxChunkSize           int           `json:"max_chunk_size"`
+	MinChunkSize           int           `json:"min_chunk_size"`
+	ProgressCallback       func(bytesProcessed, totalBytes int64, chunksCreated int)
+	EnableProgressTracking bool          `json:"enable_progress_tracking"`
+	FlushInterval          time.Duration `json:"flush_interval"`
+}
+
+// DefaultStreamingConfig returns sensible defaults for streaming parsing
+func DefaultStreamingConfig() *StreamingConfig {
+	return &StreamingConfig{
+		BufferSize:             64 * 1024,
+		ChunkOverlap:           1024,
+		MaxChunkSize:           4 * 1024,
+		MinChunkSize:           256,
+		EnableProgressTracking: true,
+		FlushInterval:          100 * time.Millisecond,
+	}
+}
+
+// StreamingResult represents the result of streaming parsing
+type StreamingResult struct {
+	Chunks          []*Chunk               `json:"chunks"`
+	TotalBytes      int64                  `json:"total_bytes"`
+	ProcessingTime  time.Duration          `json:"processing_time"`
+	ChunksCreated   int                    `json:"chunks_created"`
+	MemoryPeakUsage int64                  `json:"memory_peak_usage"`
+	Metadata        map[string]interface{} `json:"metadata"`
+	IsComplete      bool                   `json:"is_complete"`
+}
+
+// GenerateChunkID creates a unique ID for a chunk based on content and metadata
+func GenerateChunkID(content, source string) string {
+	hash := sha256.Sum256([]byte(content + source))
+	return fmt.Sprintf("chunk_%x", hash[:8])
+}
+
+// GenerateContentHash creates a hash of the content for deduplication
+func GenerateContentHash(content string) string {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	return fmt.Sprintf("%x", hash)
+}
+
+// Existing Generate functions are kept above
 
 // Relationship defines connections between DataPoints
 type Relationship struct {
@@ -867,4 +1099,48 @@ type ConsistencyResult struct {
 	Action     ResolutionAction       `json:"action"`
 	Reason     string                 `json:"reason"`
 	MergedData map[string]interface{} `json:"merged_data,omitempty"`
+}
+
+// ConvertToPtr converts a slice of Chunk to a slice of *Chunk
+func ConvertToPtr(chunks []Chunk) []*Chunk {
+	ptrChunks := make([]*Chunk, len(chunks))
+	for i := range chunks {
+		ptrChunks[i] = &chunks[i]
+	}
+	return ptrChunks
+}
+
+// ConvertToValue converts a slice of *Chunk to a slice of Chunk
+func ConvertToValue(ptrChunks []*Chunk) []Chunk {
+	chunks := make([]Chunk, len(ptrChunks))
+	for i, ptr := range ptrChunks {
+		if ptr != nil {
+			chunks[i] = *ptr
+		}
+	}
+	return chunks
+}
+
+// Connection represents a generic connection interface for any storage backend
+type Connection interface {
+	// Ping tests the connection
+	Ping(ctx context.Context) error
+
+	// Close closes the connection
+	Close() error
+
+	// IsValid checks if connection is still valid
+	IsValid() bool
+
+	// LastUsed returns when connection was last used
+	LastUsed() time.Time
+
+	// SetLastUsed updates the last used time
+	SetLastUsed(t time.Time)
+}
+
+// ConnectionFactory creates new connections for a storage backend
+type ConnectionFactory interface {
+	CreateConnection(ctx context.Context) (Connection, error)
+	ValidateConnection(ctx context.Context, conn Connection) error
 }

@@ -544,10 +544,10 @@ type StorageHealthChecker struct {
 }
 
 // NewStorageHealthChecker creates a health checker for storage backends
-func NewStorageHealthChecker(name string, storage Storage) *StorageHealthChecker {
+func NewStorageHealthChecker(name string, s Storage) *StorageHealthChecker {
 	return &StorageHealthChecker{
 		name:    name,
-		storage: storage,
+		storage: s,
 	}
 }
 

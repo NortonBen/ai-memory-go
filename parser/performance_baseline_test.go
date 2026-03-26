@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // BaselinePerformanceRequirement defines performance requirements from the design document
@@ -130,7 +132,7 @@ func TestMemoryEngineResponseTime(t *testing.T) {
 	}
 
 	// Requirement 9: Memory_Engine SHALL respond to search queries within 200ms for datasets up to 100,000 entities
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	// Simulate a dataset with multiple documents
@@ -190,7 +192,7 @@ func TestCognifyPipelinePerformance(t *testing.T) {
 					RetryDelay:    100 * time.Millisecond,
 				}
 
-				parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+				parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 				defer parser.Close()
 
 				ctx := context.Background()
@@ -306,7 +308,7 @@ func TestCachePerformanceBaseline(t *testing.T) {
 		CleanupInterval: 2 * time.Minute,
 	}
 
-	parser := NewCachedUnifiedParser(DefaultChunkingConfig(), cacheConfig)
+	parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), cacheConfig)
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -367,7 +369,7 @@ type BaselineResult struct {
 
 // runBaselineTest executes a performance baseline test
 func runBaselineTest(t *testing.T, tempDir string, baseline BaselinePerformanceRequirement) BaselineResult {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -440,7 +442,7 @@ func runBaselineTest(t *testing.T, tempDir string, baseline BaselinePerformanceR
 
 // runConcurrentBaselineTest runs concurrent parsing test
 func runConcurrentBaselineTest(t *testing.T, testFile string, baseline BaselinePerformanceRequirement) BaselineResult {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -453,7 +455,7 @@ func runConcurrentBaselineTest(t *testing.T, testFile string, baseline BaselineP
 
 	// Run concurrent test
 	start := time.Now()
-	results := make(chan []Chunk, concurrency)
+	results := make(chan []*schema.Chunk, concurrency)
 	errors := make(chan error, concurrency)
 
 	for i := 0; i < concurrency; i++ {
@@ -552,7 +554,7 @@ func generateBaselineContent(wordCount int) string {
 }
 
 func measureParsingMemory(t *testing.T, filePath string, useStreaming bool) float64 {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()

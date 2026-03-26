@@ -11,6 +11,8 @@ import (
 
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // PDFPageInfo contains information about a specific page
@@ -24,13 +26,13 @@ type PDFPageInfo struct {
 
 // PDFParser handles PDF document parsing
 type PDFParser struct {
-	config *ChunkingConfig
+	config *schema.ChunkingConfig
 }
 
 // NewPDFParser creates a new PDF parser with the given configuration
-func NewPDFParser(config *ChunkingConfig) *PDFParser {
+func NewPDFParser(config *schema.ChunkingConfig) *PDFParser {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 	return &PDFParser{config: config}
 }
@@ -52,7 +54,7 @@ type PDFMetadata struct {
 }
 
 // ParsePDF extracts text content from a PDF file and converts it to chunks
-func (pp *PDFParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
+func (pp *PDFParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("PDF file not found: %s", filePath)
@@ -254,34 +256,34 @@ func (pp *PDFParser) cleanExtractedText(text string) string {
 }
 
 // DetectContentType always returns PDF type for PDFParser
-func (pp *PDFParser) DetectContentType(content string) ChunkType {
-	return ChunkTypePDF
+func (pp *PDFParser) DetectContentType(content string) schema.ChunkType {
+	return schema.ChunkTypePDF
 }
 
 // ParseFile implements the Parser interface for PDF files
-func (pp *PDFParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (pp *PDFParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return pp.ParsePDF(ctx, filePath)
 }
 
 // ParseText is not applicable for PDFParser as it works with files
-func (pp *PDFParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (pp *PDFParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	return nil, fmt.Errorf("ParseText not supported for PDFParser, use ParseFile instead")
 }
 
 // ParseMarkdown is not applicable for PDFParser
-func (pp *PDFParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (pp *PDFParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	return nil, fmt.Errorf("ParseMarkdown not supported for PDFParser, use ParseFile instead")
 }
 
 // textToChunks converts extracted PDF text into structured chunks
-func (pp *PDFParser) textToChunks(text, source string, metadata *PDFMetadata) ([]Chunk, error) {
+func (pp *PDFParser) textToChunks(text, source string, metadata *PDFMetadata) ([]*schema.Chunk, error) {
 	return pp.textToChunksWithPages(text, source, metadata, nil)
 }
 
 // textToChunksWithPages converts extracted PDF text into structured chunks with page information
-func (pp *PDFParser) textToChunksWithPages(text, source string, metadata *PDFMetadata, pageInfos []PDFPageInfo) ([]Chunk, error) {
+func (pp *PDFParser) textToChunksWithPages(text, source string, metadata *PDFMetadata, pageInfos []PDFPageInfo) ([]*schema.Chunk, error) {
 	if strings.TrimSpace(text) == "" {
-		return []Chunk{}, nil
+		return []*schema.Chunk{}, nil
 	}
 
 	// Create a text parser to handle the chunking
@@ -305,7 +307,7 @@ func (pp *PDFParser) textToChunksWithPages(text, source string, metadata *PDFMet
 
 	// Enhance chunks with PDF-specific metadata
 	for i := range chunks {
-		chunks[i].Type = ChunkTypePDF
+		chunks[i].Type = schema.ChunkTypePDF
 		chunks[i].Source = source
 
 		// Add PDF metadata to chunk metadata

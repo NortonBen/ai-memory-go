@@ -1,1 +1,15 @@
-{"entities":[],"relations":[]}
+{
+  "entities": [
+    {
+      "name": "CLI and Examples Refactor",
+      "entityType": "Feature",
+      "observations": [
+        "Goal: Update CLI and examples to align with refactored extractor package.",
+        "Key components: internal/cli/config.go, examples/quickstart/main.go, examples/knowledge_bot_gemini/main.go.",
+        "Business Rule: All providers must be initialized via the centralized extractor registry/factory.",
+        "Business Rule: Configuration mapping from viper to extractor.ProviderConfig must be robust."
+      ]
+    }
+  ],
+  "relations": []
+}

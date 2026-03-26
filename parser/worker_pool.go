@@ -4,38 +4,18 @@ package parser
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
-// WorkerPoolConfig configures the worker pool behavior
-type WorkerPoolConfig struct {
-	// NumWorkers is the number of concurrent workers
-	NumWorkers int `json:"num_workers"`
-
-	// QueueSize is the size of the task queue buffer
-	QueueSize int `json:"queue_size"`
-
-	// Timeout is the maximum time to wait for a task to complete
-	Timeout time.Duration `json:"timeout"`
-
-	// RetryAttempts is the number of retry attempts for failed tasks
-	RetryAttempts int `json:"retry_attempts"`
-
-	// RetryDelay is the delay between retry attempts
-	RetryDelay time.Duration `json:"retry_delay"`
-}
+// WorkerPoolConfig is an alias for schema.WorkerPoolConfig
+type WorkerPoolConfig = schema.WorkerPoolConfig
 
 // DefaultWorkerPoolConfig returns a sensible default configuration
-func DefaultWorkerPoolConfig() *WorkerPoolConfig {
-	return &WorkerPoolConfig{
-		NumWorkers:    runtime.NumCPU(),
-		QueueSize:     100,
-		Timeout:       30 * time.Second,
-		RetryAttempts: 3,
-		RetryDelay:    1 * time.Second,
-	}
+func DefaultWorkerPoolConfig() *schema.WorkerPoolConfig {
+	return schema.DefaultWorkerPoolConfig()
 }
 
 // ProcessingTask represents a file processing task
@@ -51,32 +31,23 @@ type ProcessingTask struct {
 type ProcessingResult struct {
 	TaskID      string
 	FilePath    string
-	Chunks      []Chunk
+	Chunks      []*schema.Chunk
 	Error       error
 	Duration    time.Duration
 	Attempts    int
 	CompletedAt time.Time
 }
 
-// WorkerPoolMetrics tracks performance metrics
-type WorkerPoolMetrics struct {
-	TasksSubmitted        int64
-	TasksCompleted        int64
-	TasksFailed           int64
-	TasksRetried          int64
-	TotalProcessingTime   time.Duration
-	AverageProcessingTime time.Duration
-	ActiveWorkers         int
-	QueueLength           int
-}
+// WorkerPoolMetrics is an alias for schema.WorkerPoolMetrics
+type WorkerPoolMetrics = schema.WorkerPoolMetrics
 
 
 
 // WorkerPool manages parallel file processing
 type WorkerPool struct {
-	config  *WorkerPoolConfig
+	config  *schema.WorkerPoolConfig
 	parser  Parser
-	metrics   *WorkerPoolMetrics
+	metrics   *schema.WorkerPoolMetrics
 	metricsMu sync.RWMutex
 
 	// Channels for task management
@@ -104,7 +75,7 @@ type Worker struct {
 }
 
 // NewWorkerPool creates a new worker pool for parallel file processing
-func NewWorkerPool(parser Parser, config *WorkerPoolConfig) *WorkerPool {
+func NewWorkerPool(parser Parser, config *schema.WorkerPoolConfig) *WorkerPool {
 	if config == nil {
 		config = DefaultWorkerPoolConfig()
 	}
@@ -114,7 +85,7 @@ func NewWorkerPool(parser Parser, config *WorkerPoolConfig) *WorkerPool {
 	return &WorkerPool{
 		config:      config,
 		parser:      parser,
-		metrics:     &WorkerPoolMetrics{},
+		metrics:     &schema.WorkerPoolMetrics{},
 		taskQueue:   make(chan *ProcessingTask, config.QueueSize),
 		resultQueue: make(chan *ProcessingResult, config.QueueSize),
 		ctx:         ctx,
@@ -207,9 +178,9 @@ func (wp *WorkerPool) SubmitTask(filePath string, metadata map[string]interface{
 
 // ProcessFiles processes multiple files concurrently and returns results
 // ProcessFiles processes multiple files concurrently and returns results
-func (wp *WorkerPool) ProcessFiles(ctx context.Context, filePaths []string) (map[string][]Chunk, error) {
+func (wp *WorkerPool) ProcessFiles(ctx context.Context, filePaths []string) (map[string][]*schema.Chunk, error) {
 	if len(filePaths) == 0 {
-		return make(map[string][]Chunk), nil
+		return make(map[string][]*schema.Chunk), nil
 	}
 
 	// Check if context is already cancelled
@@ -230,7 +201,7 @@ func (wp *WorkerPool) ProcessFiles(ctx context.Context, filePaths []string) (map
 	}
 
 	// Collect results
-	results := make(map[string][]Chunk)
+	results := make(map[string][]*schema.Chunk)
 	errors := make(map[string]error)
 	completed := 0
 
@@ -272,7 +243,7 @@ func (wp *WorkerPool) ProcessFiles(ctx context.Context, filePaths []string) (map
 }
 
 // GetMetrics returns current worker pool metrics
-func (wp *WorkerPool) GetMetrics() WorkerPoolMetrics {
+func (wp *WorkerPool) GetMetrics() schema.WorkerPoolMetrics {
 	wp.metricsMu.Lock()
 	defer wp.metricsMu.Unlock()
 
@@ -427,5 +398,5 @@ func (w *Worker) processTask(task *ProcessingTask) {
 
 // generateTaskID creates a unique task ID
 func generateTaskID(filePath string) string {
-	return fmt.Sprintf("task_%x_%d", generateContentHash(filePath)[:8], time.Now().UnixNano())
+	return fmt.Sprintf("task_%d", time.Now().UnixNano())
 }

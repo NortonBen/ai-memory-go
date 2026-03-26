@@ -6,60 +6,62 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ContentTypeDetector provides advanced content type detection
 type ContentTypeDetector struct {
-	patterns map[ChunkType]*regexp.Regexp
+	patterns map[schema.ChunkType]*regexp.Regexp
 }
 
 // NewContentTypeDetector creates a new content type detector
 func NewContentTypeDetector() *ContentTypeDetector {
 	return &ContentTypeDetector{
-		patterns: map[ChunkType]*regexp.Regexp{
-			ChunkTypeCode:     regexp.MustCompile(`(?m)(func|class|def|import|package|public|private|const|var|let|function)\s+\w+`),
-			ChunkTypeMarkdown: regexp.MustCompile(`(?m)^#{1,6}\s+.+|^\*\*.*\*\*|\[.*\]\(.*\)`),
-			ChunkTypePDF:      regexp.MustCompile(`%PDF-`),
+		patterns: map[schema.ChunkType]*regexp.Regexp{
+			schema.ChunkTypeCode:     regexp.MustCompile(`(?m)(func|class|def|import|package|public|private|const|var|let|function)\s+\w+`),
+			schema.ChunkTypeMarkdown: regexp.MustCompile(`(?m)^#{1,6}\s+.+|^\*\*.*\*\*|\[.*\]\(.*\)`),
+			schema.ChunkTypePDF:      regexp.MustCompile(`%PDF-`),
 		},
 	}
 }
 
 // DetectContentType detects the type of content with advanced heuristics
-func (ctd *ContentTypeDetector) DetectContentType(content string) ChunkType {
+func (ctd *ContentTypeDetector) DetectContentType(content string) schema.ChunkType {
 	// Check for code patterns
-	if ctd.patterns[ChunkTypeCode].MatchString(content) {
-		return ChunkTypeCode
+	if ctd.patterns[schema.ChunkTypeCode].MatchString(content) {
+		return schema.ChunkTypeCode
 	}
 
 	// Check for markdown patterns
-	if ctd.patterns[ChunkTypeMarkdown].MatchString(content) {
-		return ChunkTypeMarkdown
+	if ctd.patterns[schema.ChunkTypeMarkdown].MatchString(content) {
+		return schema.ChunkTypeMarkdown
 	}
 
 	// Check for PDF header
-	if ctd.patterns[ChunkTypePDF].MatchString(content) {
-		return ChunkTypePDF
+	if ctd.patterns[schema.ChunkTypePDF].MatchString(content) {
+		return schema.ChunkTypePDF
 	}
 
 	// Default to text
-	return ChunkTypeText
+	return schema.ChunkTypeText
 }
 
 // DetectContentTypeFromFile detects content type from file extension
-func DetectContentTypeFromFile(filePath string) ChunkType {
+func DetectContentTypeFromFile(filePath string) schema.ChunkType {
 	ext := strings.ToLower(filepath.Ext(filePath))
 
 	switch ext {
 	case ".md", ".markdown":
-		return ChunkTypeMarkdown
+		return schema.ChunkTypeMarkdown
 	case ".pdf":
-		return ChunkTypePDF
+		return schema.ChunkTypePDF
 	case ".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".rs", ".rb":
-		return ChunkTypeCode
+		return schema.ChunkTypeCode
 	case ".txt", ".text":
-		return ChunkTypeText
+		return schema.ChunkTypeText
 	default:
-		return ChunkTypeText
+		return schema.ChunkTypeText
 	}
 }
 
@@ -183,7 +185,7 @@ func ExtractCodeLanguage(content string) string {
 }
 
 // EnrichChunkMetadata adds additional metadata to a chunk
-func EnrichChunkMetadata(chunk *Chunk, filePath string) {
+func EnrichChunkMetadata(chunk *schema.Chunk, filePath string) {
 	if chunk.Metadata == nil {
 		chunk.Metadata = make(map[string]interface{})
 	}
@@ -196,7 +198,7 @@ func EnrichChunkMetadata(chunk *Chunk, filePath string) {
 	}
 
 	// Detect language
-	if chunk.Type == ChunkTypeCode {
+	if chunk.Type == schema.ChunkTypeCode {
 		chunk.Metadata["code_language"] = ExtractCodeLanguage(chunk.Content)
 	} else {
 		chunk.Metadata["language"] = ExtractLanguage(chunk.Content)

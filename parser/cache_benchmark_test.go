@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // BenchmarkCacheOperations tests basic cache operations performance
@@ -17,8 +19,8 @@ func BenchmarkCacheOperations(b *testing.B) {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{
-		{ID: "1", Content: "Benchmark test content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Benchmark test content", Type: schema.ChunkTypeText},
 	}
 
 	b.Run("Set", func(b *testing.B) {
@@ -66,8 +68,8 @@ func BenchmarkCacheEvictionPolicies(b *testing.B) {
 			defer cache.Close()
 
 			ctx := context.Background()
-			chunks := []Chunk{
-				{ID: "1", Content: "Eviction test content", Type: ChunkTypeText},
+			chunks := []*schema.Chunk{
+				{ID: "1", Content: "Eviction test content", Type: schema.ChunkTypeText},
 			}
 
 			b.ResetTimer()
@@ -85,7 +87,7 @@ func BenchmarkCachedVsUncachedParsing(b *testing.B) {
 	testContent := strings.Repeat("This is test content for parsing benchmarks. ", 100)
 
 	// Setup parsers
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	unifiedParser := NewUnifiedParser(config)
 	defer unifiedParser.Close()
 
@@ -138,7 +140,7 @@ func BenchmarkFileParsing(b *testing.B) {
 	}
 
 	// Setup parsers
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	unifiedParser := NewUnifiedParser(config)
 	defer unifiedParser.Close()
 
@@ -187,7 +189,7 @@ func BenchmarkBatchParsing(b *testing.B) {
 	}
 
 	// Setup parsers
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	unifiedParser := NewUnifiedParser(config)
 	defer unifiedParser.Close()
 
@@ -228,8 +230,8 @@ func BenchmarkCacheMemoryUsage(b *testing.B) {
 			defer cache.Close()
 
 			ctx := context.Background()
-			chunks := []Chunk{
-				{ID: "1", Content: strings.Repeat("Memory test content ", 50), Type: ChunkTypeText},
+			chunks := []*schema.Chunk{
+				{ID: "1", Content: strings.Repeat("Memory test content ", 50), Type: schema.ChunkTypeText},
 			}
 
 			b.ResetTimer()
@@ -255,8 +257,8 @@ func BenchmarkConcurrentAccess(b *testing.B) {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{
-		{ID: "1", Content: "Concurrent access test content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Concurrent access test content", Type: schema.ChunkTypeText},
 	}
 
 	// Pre-populate cache
@@ -319,8 +321,8 @@ func BenchmarkCacheCleanup(b *testing.B) {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{
-		{ID: "1", Content: "Cleanup test content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Cleanup test content", Type: schema.ChunkTypeText},
 	}
 
 	// Populate cache with entries that will expire
@@ -344,8 +346,8 @@ func BenchmarkCacheHitRates(b *testing.B) {
 	defer cache.Close()
 
 	ctx := context.Background()
-	chunks := []Chunk{
-		{ID: "1", Content: "Hit rate test content", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Hit rate test content", Type: schema.ChunkTypeText},
 	}
 
 	// Pre-populate cache
@@ -425,7 +427,7 @@ func BenchmarkStreamingWithCache(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	config := DefaultChunkingConfig()
+	config := schema.DefaultChunkingConfig()
 	cacheConfig := DefaultCacheConfig()
 	cachedParser := NewCachedUnifiedParser(config, cacheConfig)
 	defer cachedParser.Close()

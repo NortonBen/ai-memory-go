@@ -308,6 +308,7 @@ const (
 	EmbeddingProviderVertex            EmbeddingProviderType = "vertex"
 	EmbeddingProviderGemini            EmbeddingProviderType = "gemini"
 	EmbeddingProviderLMStudio          EmbeddingProviderType = "lmstudio"
+	EmbeddingProviderOpenRouter        EmbeddingProviderType = "openrouter"
 	EmbeddingProviderCustom            EmbeddingProviderType = "custom"
 )
 
@@ -523,6 +524,21 @@ func DefaultEmbeddingProviderConfig(providerType EmbeddingProviderType) *Embeddi
 		config.Features.EnableCaching = true
 		config.Features.EnableDeduplication = true
 		config.Features.EnableCustomDimensions = true
+		config.Features.EnableUsageTracking = true
+
+	case EmbeddingProviderLMStudio:
+		config.Model = "text-embedding-nomic-embed-text-v1.5"
+		config.Endpoint = "http://localhost:1234/v1"
+		config.Dimensions = 768
+		config.MaxBatchSize = 32
+		config.Features.EnableBatching = true
+		config.Features.EnableCaching = true
+
+	case EmbeddingProviderOpenRouter:
+		config.Model = "openai/text-embedding-3-small"
+		config.Endpoint = "https://openrouter.ai/api/v1"
+		config.Dimensions = 1536
+		config.MaxBatchSize = 1
 		config.Features.EnableUsageTracking = true
 	}
 
@@ -1402,6 +1418,16 @@ type EmbeddingProviderMetrics struct {
 	Health EmbeddingProviderHealthStatus `json:"health"`
 }
 
+// EmbeddingProviderEntry holds embedding provider information with priority and health status
+type EmbeddingProviderEntry struct {
+	Provider   EmbeddingProvider
+	Priority   int
+	Health     *EmbeddingProviderHealthStatus
+	Metrics    *EmbeddingProviderMetrics
+	LastUsed   time.Time
+	UsageCount int64
+}
+
 // EmbeddingCacheProvider defines the interface for caching embedding responses
 type EmbeddingCacheProvider interface {
 	// Get retrieves a cached embedding
@@ -1664,6 +1690,16 @@ type ProviderMetrics struct {
 	Health ProviderHealthStatus `json:"health"`
 }
 
+// ProviderEntry holds provider information with priority and health status
+type ProviderEntry struct {
+	Provider   LLMProvider
+	Priority   int
+	Health     *ProviderHealthStatus
+	Metrics    *ProviderMetrics
+	LastUsed   time.Time
+	UsageCount int64
+}
+
 // ContextManager handles conversation context and memory
 type ContextManager interface {
 	// AddMessage adds a message to the conversation context
@@ -1737,8 +1773,8 @@ type EmbeddingProvider interface {
 	// DeduplicateAndEmbed removes duplicate texts and generates embeddings efficiently
 	DeduplicateAndEmbed(ctx context.Context, texts []string) (map[string][]float32, error)
 
-	// EstimateTokenCount estimates token count for text (for cost/rate limiting)
-	EstimateTokenCount(text string) (int, error)
+	// GetTokenCount estimates token count for text (for cost/rate limiting)
+	GetTokenCount(text string) (int, error)
 
 	// EstimateCost estimates the cost for embedding generation (if available)
 	EstimateCost(tokenCount int) (float64, error)

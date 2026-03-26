@@ -10,6 +10,9 @@ import (
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
 	"github.com/NortonBen/ai-memory-go/vector"
+
+	_ "github.com/NortonBen/ai-memory-go/graph/adapters/inmemory"
+	_ "github.com/NortonBen/ai-memory-go/vector/adapters/inmemory"
 )
 
 func TestNewMemoryEngine(t *testing.T) {
@@ -158,8 +161,8 @@ func TestRequest(t *testing.T) {
 		}
 		
 		store := newMockStorage()
-		graphStore := graph.NewInMemoryGraphStore()
-		vecStore := vector.NewInMemoryStore(nil)
+		graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+		vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
 		emb := &mockEmbedder{}
 		
 		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
@@ -192,8 +195,8 @@ func TestRequest(t *testing.T) {
 		}
 		
 		store := newMockStorage()
-		graphStore := graph.NewInMemoryGraphStore()
-		vecStore := vector.NewInMemoryStore(nil)
+		graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+		vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
 		emb := &mockEmbedder{}
 		
 		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
@@ -227,8 +230,8 @@ func TestRequest(t *testing.T) {
 		}
 		
 		store := newMockStorage()
-		graphStore := graph.NewInMemoryGraphStore()
-		vecStore := vector.NewInMemoryStore(nil)
+		graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+		vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
 		emb := &mockEmbedder{}
 		
 		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
@@ -250,8 +253,8 @@ func TestRequest(t *testing.T) {
 		}
 		
 		store := newMockStorage()
-		graphStore := graph.NewInMemoryGraphStore()
-		vecStore := vector.NewInMemoryStore(nil)
+		graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+		vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
 		emb := &mockEmbedder{}
 		
 		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
@@ -283,8 +286,8 @@ func TestRequest(t *testing.T) {
 		}
 		
 		store := newMockStorage()
-		graphStore := graph.NewInMemoryGraphStore()
-		vecStore := vector.NewInMemoryStore(nil)
+		graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+		vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
 		emb := &mockEmbedder{}
 		
 		engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})

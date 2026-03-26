@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/vector"
 )
 
 func TestDefaultStorageConfig(t *testing.T) {
@@ -33,12 +36,12 @@ func TestDefaultStorageConfig(t *testing.T) {
 	}
 
 	// Test graph config
-	if config.Graph.Type != GraphStoreTypeInMemory {
+	if config.Graph.Type != graph.StoreTypeInMemory {
 		t.Errorf("Expected in-memory graph store by default, got %s", config.Graph.Type)
 	}
 
 	// Test vector config
-	if config.Vector.Type != VectorStoreTypeInMemory {
+	if config.Vector.Type != vector.StoreTypeInMemory {
 		t.Errorf("Expected in-memory vector store by default, got %s", config.Vector.Type)
 	}
 
@@ -74,12 +77,12 @@ func TestConfigFactory(t *testing.T) {
 		t.Errorf("Expected SQLite for file-based profile, got %s", fileConfig.Relational.Type)
 	}
 
-	if fileConfig.Graph.Type != GraphStoreTypeKuzu {
-		t.Errorf("Expected Kuzu for file-based profile, got %s", fileConfig.Graph.Type)
+	if fileConfig.Graph.Type != graph.StoreTypeSQLite {
+		t.Errorf("Expected SQLite for file-based profile, got %s", fileConfig.Graph.Type)
 	}
 
-	if fileConfig.Vector.Type != VectorStoreTypeLanceDB {
-		t.Errorf("Expected LanceDB for file-based profile, got %s", fileConfig.Vector.Type)
+	if fileConfig.Vector.Type != vector.StoreTypeSQLite {
+		t.Errorf("Expected SQLite for file-based profile, got %s", fileConfig.Vector.Type)
 	}
 
 	// Test cloud profile
@@ -96,11 +99,11 @@ func TestConfigFactory(t *testing.T) {
 		t.Errorf("Expected PostgreSQL for cloud profile, got %s", cloudConfig.Relational.Type)
 	}
 
-	if cloudConfig.Graph.Type != GraphStoreTypeNeo4j {
+	if cloudConfig.Graph.Type != graph.StoreTypeNeo4j {
 		t.Errorf("Expected Neo4j for cloud profile, got %s", cloudConfig.Graph.Type)
 	}
 
-	if cloudConfig.Vector.Type != VectorStoreTypeQdrant {
+	if cloudConfig.Vector.Type != vector.StoreTypeQdrant {
 		t.Errorf("Expected Qdrant for cloud profile, got %s", cloudConfig.Vector.Type)
 	}
 }
@@ -117,32 +120,19 @@ func TestCreateFileBasedConfig(t *testing.T) {
 		t.Errorf("Expected database path %s, got %s", expectedDBPath, config.Relational.Database)
 	}
 
-	expectedGraphPath := filepath.Join(dataDir, "graph.kuzu")
-	if config.Graph.Kuzu.DatabasePath != expectedGraphPath {
-		t.Errorf("Expected graph path %s, got %s", expectedGraphPath, config.Graph.Kuzu.DatabasePath)
+	expectedGraphPath := filepath.Join(dataDir, "graph.db")
+	if config.Graph.Database != expectedGraphPath {
+		t.Errorf("Expected graph path %s, got %s", expectedGraphPath, config.Graph.Database)
 	}
 
-	expectedVectorPath := filepath.Join(dataDir, "vectors.lance")
-	if config.Vector.LanceDB.URI != expectedVectorPath {
-		t.Errorf("Expected vector path %s, got %s", expectedVectorPath, config.Vector.LanceDB.URI)
+	// Test SQLite-specific settings for graph
+	if config.Graph.BatchSize != 100 {
+		t.Errorf("Expected batch size 100, got %d", config.Graph.BatchSize)
 	}
 
-	// Test Kuzu-specific settings
-	if config.Graph.Kuzu.BufferPoolSize != 256*1024*1024 {
-		t.Errorf("Expected buffer pool size 256MB, got %d", config.Graph.Kuzu.BufferPoolSize)
-	}
-
-	if !config.Graph.Kuzu.EnableCompression {
-		t.Error("Expected compression to be enabled")
-	}
-
-	// Test LanceDB-specific settings
-	if config.Vector.LanceDB.StorageType != "local" {
-		t.Errorf("Expected local storage type, got %s", config.Vector.LanceDB.StorageType)
-	}
-
-	if config.Vector.LanceDB.MetricType != "cosine" {
-		t.Errorf("Expected cosine metric, got %s", config.Vector.LanceDB.MetricType)
+	expectedVectorPath := filepath.Join(dataDir, "vectors.db")
+	if config.Vector.Database != expectedVectorPath {
+		t.Errorf("Expected vector path %s, got %s", expectedVectorPath, config.Vector.Database)
 	}
 }
 
@@ -250,12 +240,12 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 
 	// Test graph settings
-	if config.Graph.Type != GraphStoreTypeNeo4j {
+	if config.Graph.Type != graph.StoreTypeNeo4j {
 		t.Errorf("Expected Neo4j, got %s", config.Graph.Type)
 	}
 
 	// Test vector settings
-	if config.Vector.Type != VectorStoreTypeQdrant {
+	if config.Vector.Type != vector.StoreTypeQdrant {
 		t.Errorf("Expected Qdrant, got %s", config.Vector.Type)
 	}
 

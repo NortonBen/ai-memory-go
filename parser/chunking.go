@@ -3,34 +3,37 @@ package parser
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // TextParser implements the Parser interface for text content
 type TextParser struct {
-	config *ChunkingConfig
+	config *schema.ChunkingConfig
 }
 
 // NewTextParser creates a new text parser with the given configuration
-func NewTextParser(config *ChunkingConfig) *TextParser {
+func NewTextParser(config *schema.ChunkingConfig) *TextParser {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 	return &TextParser{config: config}
 }
 
 // ParseText implements text chunking based on the configured strategy
-func (tp *TextParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (tp *TextParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	switch tp.config.Strategy {
-	case StrategyParagraph:
+	case schema.StrategyParagraph:
 		return tp.chunkByParagraph(content, "text")
-	case StrategySentence:
+	case schema.StrategySentence:
 		return tp.chunkBySentence(content, "text")
-	case StrategyFixedSize:
+	case schema.StrategyFixedSize:
 		return tp.chunkByFixedSize(content, "text")
-	case StrategySemantic:
+	case schema.StrategySemantic:
 		return tp.chunkBySemantic(content, "text")
 	default:
 		return tp.chunkByParagraph(content, "text")
@@ -38,25 +41,24 @@ func (tp *TextParser) ParseText(ctx context.Context, content string) ([]Chunk, e
 }
 
 // ParseFile parses a file based on its extension
-func (tp *TextParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (tp *TextParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// This will be implemented with file reading logic
 	// For now, return empty slice
-	return []Chunk{}, nil
+	return []*schema.Chunk{}, nil
 }
 
 // ParseMarkdown parses markdown content with structure preservation
-func (tp *TextParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (tp *TextParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	return tp.chunkByParagraph(content, "markdown")
 }
 
 // ParsePDF parses PDF files using the PDFParser
-func (tp *TextParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
-	pdfParser := NewPDFParser(tp.config)
-	return pdfParser.ParsePDF(ctx, filePath)
+func (tp *TextParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
+	return []*schema.Chunk{}, fmt.Errorf("PDF parsing not implemented in TextParser")
 }
 
 // DetectContentType detects the type of content
-func (tp *TextParser) DetectContentType(content string) ChunkType {
+func (tp *TextParser) DetectContentType(content string) schema.ChunkType {
 	// Simple heuristics for content type detection
 	if strings.Contains(content, "```") ||
 		strings.Contains(content, "func ") ||
@@ -65,22 +67,22 @@ func (tp *TextParser) DetectContentType(content string) ChunkType {
 		strings.Contains(content, "function ") ||
 		strings.Contains(content, "import ") ||
 		strings.Contains(content, "package ") {
-		return ChunkTypeCode
+		return schema.ChunkTypeCode
 	}
 	if (strings.Contains(content, "#") && strings.Contains(content, "\n")) ||
 		strings.Contains(content, "**") ||
 		strings.Contains(content, "[") && strings.Contains(content, "](") {
-		return ChunkTypeMarkdown
+		return schema.ChunkTypeMarkdown
 	}
-	return ChunkTypeText
+	return schema.ChunkTypeText
 }
 
 // chunkByParagraph splits text into paragraph-based chunks
-func (tp *TextParser) chunkByParagraph(content, source string) ([]Chunk, error) {
+func (tp *TextParser) chunkByParagraph(content, source string) ([]*schema.Chunk, error) {
 	// Split by double newlines (paragraphs)
 	paragraphs := regexp.MustCompile(`\n\s*\n`).Split(content, -1)
 
-	chunks := make([]Chunk, 0)
+	chunks := make([]*schema.Chunk, 0)
 	currentChunk := ""
 
 	for _, para := range paragraphs {
@@ -93,8 +95,8 @@ func (tp *TextParser) chunkByParagraph(content, source string) ([]Chunk, error) 
 		if len(currentChunk)+len(para)+2 > tp.config.MaxSize && currentChunk != "" {
 			// Only create chunk if it meets minimum size
 			if len(currentChunk) >= tp.config.MinSize {
-				chunk := NewChunk(currentChunk, source, ChunkTypeParagraph)
-				chunks = append(chunks, *chunk)
+				chunk := NewChunk(currentChunk, source, schema.ChunkTypeParagraph)
+				chunks = append(chunks, chunk)
 			}
 
 			// Start new chunk with overlap
@@ -114,26 +116,26 @@ func (tp *TextParser) chunkByParagraph(content, source string) ([]Chunk, error) 
 
 	// Add remaining chunk if it meets minimum size
 	if currentChunk != "" && len(currentChunk) >= tp.config.MinSize {
-		chunk := NewChunk(currentChunk, source, ChunkTypeParagraph)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(currentChunk, source, schema.ChunkTypeParagraph)
+		chunks = append(chunks, chunk)
 	}
 
 	// If no chunks were created but we have content, create one chunk regardless of MinSize
 	if len(chunks) == 0 && strings.TrimSpace(content) != "" {
-		chunk := NewChunk(strings.TrimSpace(content), source, ChunkTypeParagraph)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(strings.TrimSpace(content), source, schema.ChunkTypeParagraph)
+		chunks = append(chunks, chunk)
 	}
 
 	return chunks, nil
 }
 
 // chunkBySentence splits text into sentence-based chunks
-func (tp *TextParser) chunkBySentence(content, source string) ([]Chunk, error) {
+func (tp *TextParser) chunkBySentence(content, source string) ([]*schema.Chunk, error) {
 	// Simple sentence splitting (can be improved with NLP)
 	sentenceRegex := regexp.MustCompile(`[.!?]+[\s\n]*`)
 	sentences := sentenceRegex.Split(content, -1)
 
-	chunks := make([]Chunk, 0)
+	chunks := make([]*schema.Chunk, 0)
 	currentChunk := ""
 
 	for _, sentence := range sentences {
@@ -146,8 +148,8 @@ func (tp *TextParser) chunkBySentence(content, source string) ([]Chunk, error) {
 		if len(currentChunk)+len(sentence)+2 > tp.config.MaxSize && currentChunk != "" {
 			// Only create chunk if it meets minimum size
 			if len(currentChunk) >= tp.config.MinSize {
-				chunk := NewChunk(currentChunk, source, ChunkTypeSentence)
-				chunks = append(chunks, *chunk)
+				chunk := NewChunk(currentChunk, source, schema.ChunkTypeSentence)
+				chunks = append(chunks, chunk)
 			}
 
 			// Start new chunk with overlap
@@ -167,22 +169,22 @@ func (tp *TextParser) chunkBySentence(content, source string) ([]Chunk, error) {
 
 	// Add remaining chunk if it meets minimum size
 	if currentChunk != "" && len(currentChunk) >= tp.config.MinSize {
-		chunk := NewChunk(currentChunk, source, ChunkTypeSentence)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(currentChunk, source, schema.ChunkTypeSentence)
+		chunks = append(chunks, chunk)
 	}
 
 	// If no chunks were created but we have content, create one chunk regardless of MinSize
 	if len(chunks) == 0 && strings.TrimSpace(content) != "" {
-		chunk := NewChunk(strings.TrimSpace(content), source, ChunkTypeSentence)
-		chunks = append(chunks, *chunk)
+		chunk := NewChunk(strings.TrimSpace(content), source, schema.ChunkTypeSentence)
+		chunks = append(chunks, chunk)
 	}
 
 	return chunks, nil
 }
 
 // chunkByFixedSize splits text into fixed-size chunks with overlap
-func (tp *TextParser) chunkByFixedSize(content, source string) ([]Chunk, error) {
-	chunks := make([]Chunk, 0)
+func (tp *TextParser) chunkByFixedSize(content, source string) ([]*schema.Chunk, error) {
+	chunks := make([]*schema.Chunk, 0)
 	contentRunes := []rune(content)
 
 	for i := 0; i < len(contentRunes); i += tp.config.MaxSize - tp.config.Overlap {
@@ -195,8 +197,8 @@ func (tp *TextParser) chunkByFixedSize(content, source string) ([]Chunk, error) 
 		chunkContent = strings.TrimSpace(chunkContent)
 
 		if len(chunkContent) >= tp.config.MinSize {
-			chunk := NewChunk(chunkContent, source, ChunkTypeText)
-			chunks = append(chunks, *chunk)
+			chunk := NewChunk(chunkContent, source, schema.ChunkTypeText)
+			chunks = append(chunks, chunk)
 		}
 
 		// Break if we've reached the end
@@ -209,7 +211,7 @@ func (tp *TextParser) chunkByFixedSize(content, source string) ([]Chunk, error) 
 }
 
 // chunkBySemantic splits text using semantic boundaries (simplified version)
-func (tp *TextParser) chunkBySemantic(content, source string) ([]Chunk, error) {
+func (tp *TextParser) chunkBySemantic(content, source string) ([]*schema.Chunk, error) {
 	// For now, use paragraph-based chunking as a baseline
 	// A full semantic chunking would require embeddings and similarity analysis
 	return tp.chunkByParagraph(content, source)

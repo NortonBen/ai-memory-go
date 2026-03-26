@@ -7,11 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // UnifiedParser implements the Parser interface for all supported formats
 type UnifiedParser struct {
-	config          *ChunkingConfig
+	config          *schema.ChunkingConfig
 	textParser      *TextParser
 	pdfParser       *PDFParser
 	formatParser    *FormatParser
@@ -20,9 +21,9 @@ type UnifiedParser struct {
 }
 
 // NewUnifiedParser creates a new unified parser that handles all formats
-func NewUnifiedParser(config *ChunkingConfig) *UnifiedParser {
+func NewUnifiedParser(config *schema.ChunkingConfig) *UnifiedParser {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 
 	parser := &UnifiedParser{
@@ -40,12 +41,12 @@ func NewUnifiedParser(config *ChunkingConfig) *UnifiedParser {
 }
 
 // NewUnifiedParserWithCache creates a unified parser with caching enabled
-func NewUnifiedParserWithCache(config *ChunkingConfig, cacheConfig *CacheConfig) *CachedUnifiedParser {
+func NewUnifiedParserWithCache(config *schema.ChunkingConfig, cacheConfig *schema.CacheConfig) *CachedUnifiedParser {
 	return NewCachedUnifiedParser(config, cacheConfig)
 }
 
 // ParseFile parses a file based on its extension and content type
-func (up *UnifiedParser) ParseFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("file does not exist: %s", filePath)
@@ -72,18 +73,18 @@ func (up *UnifiedParser) ParseFile(ctx context.Context, filePath string) ([]Chun
 }
 
 // ParseText parses raw text content into chunks
-func (up *UnifiedParser) ParseText(ctx context.Context, content string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseText(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	return up.textParser.ParseText(ctx, content)
 }
 
 // ParseMarkdown parses markdown content with structure preservation
-func (up *UnifiedParser) ParseMarkdown(ctx context.Context, content string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseMarkdown(ctx context.Context, content string) ([]*schema.Chunk, error) {
 	// Use existing markdown parser if available, otherwise use text parser
 	return up.textParser.ParseMarkdown(ctx, content)
 }
 
 // ParseMarkdownFile parses a markdown file
-func (up *UnifiedParser) ParseMarkdownFile(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseMarkdownFile(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read markdown file: %w", err)
@@ -104,7 +105,7 @@ func (up *UnifiedParser) ParseMarkdownFile(ctx context.Context, filePath string)
 
 	for i := range chunks {
 		chunks[i].Source = filePath
-		chunks[i].Type = ChunkTypeMarkdown
+		chunks[i].Type = schema.ChunkTypeMarkdown
 		for k, v := range metadata {
 			chunks[i].Metadata[k] = v
 		}
@@ -114,27 +115,27 @@ func (up *UnifiedParser) ParseMarkdownFile(ctx context.Context, filePath string)
 }
 
 // ParsePDF parses PDF files into text chunks
-func (up *UnifiedParser) ParsePDF(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParsePDF(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return up.pdfParser.ParsePDF(ctx, filePath)
 }
 
 // DetectContentType detects the type of content
-func (up *UnifiedParser) DetectContentType(content string) ChunkType {
+func (up *UnifiedParser) DetectContentType(content string) schema.ChunkType {
 	return up.textParser.DetectContentType(content)
 }
 
 // ParseCSV parses CSV files
-func (up *UnifiedParser) ParseCSV(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseCSV(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return up.formatParser.ParseCSV(ctx, filePath)
 }
 
 // ParseJSON parses JSON files
-func (up *UnifiedParser) ParseJSON(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseJSON(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return up.formatParser.ParseJSON(ctx, filePath)
 }
 
 // ParseTXT parses plain text files
-func (up *UnifiedParser) ParseTXT(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseTXT(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	return up.formatParser.ParseTXT(ctx, filePath)
 }
 
@@ -160,9 +161,9 @@ func (up *UnifiedParser) IsFormatSupported(filePath string) bool {
 }
 
 // BatchParseFiles parses multiple files concurrently using the worker pool
-func (up *UnifiedParser) BatchParseFiles(ctx context.Context, filePaths []string) (map[string][]Chunk, error) {
+func (up *UnifiedParser) BatchParseFiles(ctx context.Context, filePaths []string) (map[string][]*schema.Chunk, error) {
 	if len(filePaths) == 0 {
-		return make(map[string][]Chunk), nil
+		return make(map[string][]*schema.Chunk), nil
 	}
 
 	// Start worker pool if not already started
@@ -177,7 +178,7 @@ func (up *UnifiedParser) BatchParseFiles(ctx context.Context, filePaths []string
 }
 
 // ValidateChunks validates that chunks meet quality requirements
-func (up *UnifiedParser) ValidateChunks(chunks []Chunk) error {
+func (up *UnifiedParser) ValidateChunks(chunks []*schema.Chunk) error {
 	for i, chunk := range chunks {
 		if chunk.Content == "" {
 			return fmt.Errorf("chunk %d has empty content", i)
@@ -200,12 +201,12 @@ func (up *UnifiedParser) ValidateChunks(chunks []Chunk) error {
 }
 
 // NewUnifiedParserWithWorkerPool creates a parser with custom worker pool configuration
-func NewUnifiedParserWithWorkerPool(config *ChunkingConfig, workerConfig *WorkerPoolConfig) *UnifiedParser {
+func NewUnifiedParserWithWorkerPool(config *schema.ChunkingConfig, workerConfig *schema.WorkerPoolConfig) *UnifiedParser {
 	if config == nil {
-		config = DefaultChunkingConfig()
+		config = schema.DefaultChunkingConfig()
 	}
 	if workerConfig == nil {
-		workerConfig = DefaultWorkerPoolConfig()
+		workerConfig = schema.DefaultWorkerPoolConfig()
 	}
 
 	parser := &UnifiedParser{
@@ -233,7 +234,7 @@ func (up *UnifiedParser) StopWorkerPool() error {
 }
 
 // GetWorkerPoolMetrics returns current worker pool performance metrics
-func (up *UnifiedParser) GetWorkerPoolMetrics() WorkerPoolMetrics {
+func (up *UnifiedParser) GetWorkerPoolMetrics() schema.WorkerPoolMetrics {
 	return up.workerPool.GetMetrics()
 }
 
@@ -243,9 +244,9 @@ func (up *UnifiedParser) IsWorkerPoolHealthy() bool {
 }
 
 // ProcessFilesParallel processes multiple files in parallel with custom options
-func (up *UnifiedParser) ProcessFilesParallel(ctx context.Context, filePaths []string, metadata map[string]interface{}) (map[string][]Chunk, error) {
+func (up *UnifiedParser) ProcessFilesParallel(ctx context.Context, filePaths []string, metadata map[string]interface{}) (map[string][]*schema.Chunk, error) {
 	if len(filePaths) == 0 {
-		return make(map[string][]Chunk), nil
+		return make(map[string][]*schema.Chunk), nil
 	}
 
 	// Ensure worker pool is started
@@ -256,7 +257,7 @@ func (up *UnifiedParser) ProcessFilesParallel(ctx context.Context, filePaths []s
 	}
 
 	// Submit tasks with metadata
-	results := make(map[string][]Chunk)
+	results := make(map[string][]*schema.Chunk)
 	errors := make(map[string]error)
 
 	// Submit all tasks
@@ -308,22 +309,22 @@ func (up *UnifiedParser) Close() error {
 }
 
 // ParseFileStream parses large files using streaming approach for memory efficiency
-func (up *UnifiedParser) ParseFileStream(ctx context.Context, filePath string) (*StreamingResult, error) {
+func (up *UnifiedParser) ParseFileStream(ctx context.Context, filePath string) (*schema.StreamingResult, error) {
 	return up.streamingParser.ParseFileStream(ctx, filePath)
 }
 
 // ParseReaderStream parses content from io.Reader using streaming approach
-func (up *UnifiedParser) ParseReaderStream(ctx context.Context, reader io.Reader, source string) (*StreamingResult, error) {
+func (up *UnifiedParser) ParseReaderStream(ctx context.Context, reader io.Reader, source string) (*schema.StreamingResult, error) {
 	return up.streamingParser.ParseReaderStream(ctx, reader, source)
 }
 
 // UpdateStreamingConfig updates the streaming parser configuration
-func (up *UnifiedParser) UpdateStreamingConfig(config *StreamingConfig) {
+func (up *UnifiedParser) UpdateStreamingConfig(config *schema.StreamingConfig) {
 	up.streamingParser.UpdateConfig(config)
 }
 
 // GetStreamingConfig returns the current streaming configuration
-func (up *UnifiedParser) GetStreamingConfig() *StreamingConfig {
+func (up *UnifiedParser) GetStreamingConfig() *schema.StreamingConfig {
 	return up.streamingParser.GetConfig()
 }
 
@@ -345,7 +346,7 @@ func (up *UnifiedParser) ShouldUseStreaming(filePath string) (bool, error) {
 }
 
 // ParseFileAuto automatically chooses between regular and streaming parsing
-func (up *UnifiedParser) ParseFileAuto(ctx context.Context, filePath string) ([]Chunk, error) {
+func (up *UnifiedParser) ParseFileAuto(ctx context.Context, filePath string) ([]*schema.Chunk, error) {
 	useStreaming, err := up.ShouldUseStreaming(filePath)
 	if err != nil {
 		return nil, err

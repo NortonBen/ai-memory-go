@@ -6,6 +6,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/graph"
@@ -85,16 +86,62 @@ const (
 	StorageTypeInMemory   StorageType = "inmemory"
 )
 
+// RelationalStoreFactory creates a RelationalStore from a config
+type RelationalStoreFactory func(config *RelationalConfig) (RelationalStore, error)
+
+var (
+	relationalRegistry = make(map[StorageType]RelationalStoreFactory)
+	relationalMu       sync.RWMutex
+)
+
+// RegisterRelationalStore registers a relational store factory
+func RegisterRelationalStore(storageType StorageType, factory RelationalStoreFactory) {
+	relationalMu.Lock()
+	defer relationalMu.Unlock()
+	relationalRegistry[storageType] = factory
+}
+
+// GetRegisteredRelationalStores returns all registered relational store types
+func GetRegisteredRelationalStores() []StorageType {
+	relationalMu.RLock()
+	defer relationalMu.RUnlock()
+	types := make([]StorageType, 0, len(relationalRegistry))
+	for t := range relationalRegistry {
+		types = append(types, t)
+	}
+	return types
+}
+
+// NewRelationalStore creates a relational store from a config using the registry
+func NewRelationalStore(config *RelationalConfig) (RelationalStore, error) {
+	relationalMu.RLock()
+	factory, exists := relationalRegistry[config.Type]
+	relationalMu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("unsupported relational storage type: %s", config.Type)
+	}
+	return factory(config)
+}
+
+// NewSQLiteAdapter creates a new SQLite relational store (legacy facade)
+func NewSQLiteAdapter(config *RelationalConfig) (RelationalStore, error) {
+	if config.Type == "" {
+		config.Type = StorageTypeSQLite
+	}
+	return NewRelationalStore(config)
+}
+
 // StorageConfig holds configuration for storage backends
 type StorageConfig struct {
 	// Relational store config
 	Relational *RelationalConfig `json:"relational"`
 
 	// Graph store config
-	Graph *GraphConfig `json:"graph"`
+	Graph *graph.GraphConfig `json:"graph"`
 
 	// Vector store config
-	Vector *VectorConfig `json:"vector"`
+	Vector *vector.VectorConfig `json:"vector"`
 
 	// Global settings
 	EnableTransactions bool          `json:"enable_transactions"`
@@ -106,66 +153,6 @@ type StorageConfig struct {
 	Environment string            `json:"environment"` // development, staging, production
 	ConfigFile  string            `json:"config_file,omitempty"`
 	Profiles    map[string]string `json:"profiles,omitempty"` // Named configuration profiles
-}
-
-// GraphConfig holds configuration for graph stores
-type GraphConfig struct {
-	Type     GraphStoreType         `json:"type"`
-	Host     string                 `json:"host,omitempty"`
-	Port     int                    `json:"port,omitempty"`
-	Database string                 `json:"database,omitempty"`
-	Username string                 `json:"username,omitempty"`
-	Password string                 `json:"password,omitempty"`
-	Options  map[string]interface{} `json:"options,omitempty"`
-
-	// Connection pooling
-	MaxConnections int           `json:"max_connections"`
-	ConnTimeout    time.Duration `json:"conn_timeout"`
-	IdleTimeout    time.Duration `json:"idle_timeout"`
-
-	// Performance settings
-	BatchSize      int  `json:"batch_size"`
-	EnableIndexing bool `json:"enable_indexing"`
-	EnableCaching  bool `json:"enable_caching"`
-
-	// Provider-specific configurations
-	Neo4j     *Neo4jConfig     `json:"neo4j,omitempty"`
-	SurrealDB *SurrealDBConfig `json:"surrealdb,omitempty"`
-	Kuzu      *KuzuConfig      `json:"kuzu,omitempty"`
-	FalkorDB  *FalkorDBConfig  `json:"falkordb,omitempty"`
-}
-
-// VectorConfig holds configuration for vector stores
-type VectorConfig struct {
-	Type       VectorStoreType        `json:"type"`
-	Host       string                 `json:"host,omitempty"`
-	Port       int                    `json:"port,omitempty"`
-	Database   string                 `json:"database,omitempty"`
-	Collection string                 `json:"collection,omitempty"`
-	Username   string                 `json:"username,omitempty"`
-	Password   string                 `json:"password,omitempty"`
-	Options    map[string]interface{} `json:"options,omitempty"`
-
-	// Vector-specific settings
-	Dimension      int    `json:"dimension"`
-	DistanceMetric string `json:"distance_metric"` // cosine, euclidean, dot_product
-	IndexType      string `json:"index_type"`      // hnsw, ivf, flat
-
-	// Connection pooling
-	MaxConnections int           `json:"max_connections"`
-	ConnTimeout    time.Duration `json:"conn_timeout"`
-	IdleTimeout    time.Duration `json:"idle_timeout"`
-
-	// Performance settings
-	BatchSize     int  `json:"batch_size"`
-	EnableCaching bool `json:"enable_caching"`
-
-	// Provider-specific configurations
-	Qdrant   *QdrantConfig   `json:"qdrant,omitempty"`
-	LanceDB  *LanceDBConfig  `json:"lancedb,omitempty"`
-	PgVector *PgVectorConfig `json:"pgvector,omitempty"`
-	ChromaDB *ChromaDBConfig `json:"chromadb,omitempty"`
-	Redis    *RedisConfig    `json:"redis,omitempty"`
 }
 
 // RelationalConfig holds configuration for relational databases
@@ -207,8 +194,8 @@ func DefaultStorageConfig() *StorageConfig {
 			EnableFullText:    true,
 			EnableJSONIndexes: true,
 		},
-		Graph:              DefaultGraphConfig(),
-		Vector:             DefaultVectorConfig(),
+		Graph:              graph.DefaultGraphConfig(),
+		Vector:             vector.DefaultVectorConfig(),
 		EnableTransactions: true,
 		ConnectionTimeout:  30 * time.Second,
 		QueryTimeout:       30 * time.Second,
@@ -245,34 +232,6 @@ type DataPointQuery struct {
 	// Include options
 	IncludeEmbeddings    bool `json:"include_embeddings"`
 	IncludeRelationships bool `json:"include_relationships"`
-}
-
-// DefaultGraphConfig returns sensible defaults for graph storage
-func DefaultGraphConfig() *GraphConfig {
-	return &GraphConfig{
-		Type:           GraphStoreTypeInMemory,
-		MaxConnections: 10,
-		ConnTimeout:    30 * time.Second,
-		IdleTimeout:    5 * time.Minute,
-		BatchSize:      100,
-		EnableIndexing: true,
-		EnableCaching:  true,
-	}
-}
-
-// DefaultVectorConfig returns sensible defaults for vector storage
-func DefaultVectorConfig() *VectorConfig {
-	return &VectorConfig{
-		Type:           VectorStoreTypeInMemory,
-		Dimension:      768, // Common embedding dimension
-		DistanceMetric: "cosine",
-		IndexType:      "hnsw",
-		MaxConnections: 10,
-		ConnTimeout:    30 * time.Second,
-		IdleTimeout:    5 * time.Minute,
-		BatchSize:      100,
-		EnableCaching:  true,
-	}
 }
 
 // DefaultDataPointQuery returns sensible defaults
@@ -368,28 +327,7 @@ type Migrator interface {
 
 // Provider-specific configuration structs
 
-// GraphStoreType defines supported graph database types
-type GraphStoreType string
 
-const (
-	GraphStoreTypeNeo4j     GraphStoreType = "neo4j"
-	GraphStoreTypeSurrealDB GraphStoreType = "surrealdb"
-	GraphStoreTypeKuzu      GraphStoreType = "kuzu"
-	GraphStoreTypeInMemory  GraphStoreType = "inmemory"
-	GraphStoreTypeFalkorDB  GraphStoreType = "falkordb"
-)
-
-// VectorStoreType defines supported vector database types
-type VectorStoreType string
-
-const (
-	VectorStoreTypeQdrant   VectorStoreType = "qdrant"
-	VectorStoreTypeLanceDB  VectorStoreType = "lancedb"
-	VectorStoreTypePgVector VectorStoreType = "pgvector"
-	VectorStoreTypeChromaDB VectorStoreType = "chromadb"
-	VectorStoreTypeRedis    VectorStoreType = "redis"
-	VectorStoreTypeInMemory VectorStoreType = "inmemory"
-)
 
 // Neo4j-specific configuration
 type Neo4jConfig struct {

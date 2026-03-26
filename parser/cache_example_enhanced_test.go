@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ExampleInMemoryParsingCache_enhancedFeatures demonstrates the enhanced caching features
@@ -41,8 +43,8 @@ func ExampleInMemoryParsingCache_enhancedFeatures() {
 		largeContent[i] = 'A'
 	}
 
-	chunks := []Chunk{
-		{ID: "1", Content: string(largeContent), Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: string(largeContent), Type: schema.ChunkTypeText},
 	}
 
 	// Set with compression and tags
@@ -66,8 +68,8 @@ func ExampleInMemoryParsingCache_enhancedFeatures() {
 
 	// Example 2: Tag-based operations
 	// Add more tagged content
-	smallChunks := []Chunk{
-		{ID: "2", Content: "Small content", Type: ChunkTypeText},
+	smallChunks := []*schema.Chunk{
+		{ID: "2", Content: "Small content", Type: schema.ChunkTypeText},
 	}
 
 	tagOptions := &CacheEntryOptions{
@@ -117,10 +119,10 @@ func ExampleCachedUnifiedParser_integration() {
 	defer os.Remove(testFile)
 
 	// Create cached parser with enhanced configuration
-	chunkConfig := DefaultChunkingConfig()
+	chunkConfig := schema.DefaultChunkingConfig()
 	chunkConfig.MinSize = 10
 
-	cacheConfig := DefaultCacheConfig()
+	cacheConfig := schema.DefaultCacheConfig()
 	cacheConfig.EnableCompression = true
 	cacheConfig.EnableMetrics = true
 
@@ -195,10 +197,10 @@ func ExampleCachedUnifiedParser_batchParsing() {
 	}
 
 	// Create cached parser
-	chunkConfig := DefaultChunkingConfig()
+	chunkConfig := schema.DefaultChunkingConfig()
 	chunkConfig.MinSize = 10
 
-	cacheConfig := DefaultCacheConfig()
+	cacheConfig := schema.DefaultCacheConfig()
 	cacheConfig.EnableMetrics = true
 
 	cachedParser := NewCachedUnifiedParser(chunkConfig, cacheConfig)
@@ -259,7 +261,7 @@ func ExampleInMemoryParsingCache_persistence() {
 	defer os.Remove(cacheFile)
 
 	// Create cache with persistence enabled
-	config := DefaultCacheConfig()
+	config := schema.DefaultCacheConfig()
 	config.EnablePersistence = true
 	config.PersistencePath = cacheFile
 
@@ -267,8 +269,8 @@ func ExampleInMemoryParsingCache_persistence() {
 	ctx := context.Background()
 
 	// Add some content to cache
-	chunks := []Chunk{
-		{ID: "1", Content: "Persistent content example", Type: ChunkTypeText},
+	chunks := []*schema.Chunk{
+		{ID: "1", Content: "Persistent content example", Type: schema.ChunkTypeText},
 	}
 
 	err := cache.Set(ctx, "persistent-key", chunks, nil)

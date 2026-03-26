@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sync"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ChunkDeduplicator handles deduplication of chunks based on content hashing
@@ -21,7 +23,7 @@ func NewChunkDeduplicator() *ChunkDeduplicator {
 }
 
 // IsDuplicate checks if a chunk is a duplicate based on its hash
-func (cd *ChunkDeduplicator) IsDuplicate(chunk *Chunk) bool {
+func (cd *ChunkDeduplicator) IsDuplicate(chunk *schema.Chunk) bool {
 	cd.mu.RLock()
 	defer cd.mu.RUnlock()
 	
@@ -29,7 +31,7 @@ func (cd *ChunkDeduplicator) IsDuplicate(chunk *Chunk) bool {
 }
 
 // MarkAsSeen marks a chunk's hash as seen
-func (cd *ChunkDeduplicator) MarkAsSeen(chunk *Chunk) {
+func (cd *ChunkDeduplicator) MarkAsSeen(chunk *schema.Chunk) {
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 	
@@ -37,12 +39,12 @@ func (cd *ChunkDeduplicator) MarkAsSeen(chunk *Chunk) {
 }
 
 // DeduplicateChunks removes duplicate chunks from a slice
-func (cd *ChunkDeduplicator) DeduplicateChunks(chunks []Chunk) []Chunk {
-	unique := make([]Chunk, 0)
+func (cd *ChunkDeduplicator) DeduplicateChunks(chunks []*schema.Chunk) []*schema.Chunk {
+	unique := make([]*schema.Chunk, 0)
 	
 	for _, chunk := range chunks {
-		if !cd.IsDuplicate(&chunk) {
-			cd.MarkAsSeen(&chunk)
+		if !cd.IsDuplicate(chunk) {
+			cd.MarkAsSeen(chunk)
 			unique = append(unique, chunk)
 		}
 	}
@@ -67,9 +69,9 @@ func (cd *ChunkDeduplicator) GetSeenCount() int {
 }
 
 // DeduplicateChunksGlobal removes duplicates from a slice without maintaining state
-func DeduplicateChunksGlobal(chunks []Chunk) []Chunk {
+func DeduplicateChunksGlobal(chunks []*schema.Chunk) []*schema.Chunk {
 	seen := make(map[string]bool)
-	unique := make([]Chunk, 0)
+	unique := make([]*schema.Chunk, 0)
 	
 	for _, chunk := range chunks {
 		if !seen[chunk.Hash] {
@@ -134,7 +136,7 @@ func HammingDistance(hash1, hash2 string) int {
 }
 
 // AreSimilar checks if two chunks are similar based on their similarity hashes
-func AreSimilar(chunk1, chunk2 *Chunk, threshold int) bool {
+func AreSimilar(chunk1, chunk2 *schema.Chunk, threshold int) bool {
 	hash1 := ComputeSimilarityHash(chunk1.Content)
 	hash2 := ComputeSimilarityHash(chunk2.Content)
 	
@@ -144,7 +146,7 @@ func AreSimilar(chunk1, chunk2 *Chunk, threshold int) bool {
 
 // FuzzyDeduplicator handles fuzzy deduplication based on similarity
 type FuzzyDeduplicator struct {
-	chunks    []Chunk
+	chunks    []*schema.Chunk
 	threshold int
 	mu        sync.RWMutex
 }
@@ -152,19 +154,19 @@ type FuzzyDeduplicator struct {
 // NewFuzzyDeduplicator creates a new fuzzy deduplicator
 func NewFuzzyDeduplicator(threshold int) *FuzzyDeduplicator {
 	return &FuzzyDeduplicator{
-		chunks:    make([]Chunk, 0),
+		chunks:    make([]*schema.Chunk, 0),
 		threshold: threshold,
 	}
 }
 
 // AddChunk adds a chunk if it's not similar to existing chunks
-func (fd *FuzzyDeduplicator) AddChunk(chunk Chunk) bool {
+func (fd *FuzzyDeduplicator) AddChunk(chunk *schema.Chunk) bool {
 	fd.mu.Lock()
 	defer fd.mu.Unlock()
 	
 	// Check similarity with existing chunks
 	for _, existing := range fd.chunks {
-		if AreSimilar(&chunk, &existing, fd.threshold) {
+		if AreSimilar(chunk, existing, fd.threshold) {
 			return false // Similar chunk already exists
 		}
 	}
@@ -175,11 +177,11 @@ func (fd *FuzzyDeduplicator) AddChunk(chunk Chunk) bool {
 }
 
 // GetUniqueChunks returns all unique chunks
-func (fd *FuzzyDeduplicator) GetUniqueChunks() []Chunk {
+func (fd *FuzzyDeduplicator) GetUniqueChunks() []*schema.Chunk {
 	fd.mu.RLock()
 	defer fd.mu.RUnlock()
 	
-	result := make([]Chunk, len(fd.chunks))
+	result := make([]*schema.Chunk, len(fd.chunks))
 	copy(result, fd.chunks)
 	return result
 }
@@ -189,7 +191,7 @@ func (fd *FuzzyDeduplicator) Reset() {
 	fd.mu.Lock()
 	defer fd.mu.Unlock()
 	
-	fd.chunks = make([]Chunk, 0)
+	fd.chunks = make([]*schema.Chunk, 0)
 }
 
 // DeduplicationStats provides statistics about deduplication
@@ -201,7 +203,7 @@ type DeduplicationStats struct {
 }
 
 // ComputeDeduplicationStats computes statistics for a deduplication operation
-func ComputeDeduplicationStats(original, deduplicated []Chunk) *DeduplicationStats {
+func ComputeDeduplicationStats(original, deduplicated []*schema.Chunk) *DeduplicationStats {
 	total := len(original)
 	unique := len(deduplicated)
 	duplicates := total - unique

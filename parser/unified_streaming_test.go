@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -167,8 +168,8 @@ func TestUnifiedParserStreamingMemoryUsage(t *testing.T) {
 }
 
 func TestUnifiedParserStreamingWithCustomChunkingConfig(t *testing.T) {
-	chunkConfig := &ChunkingConfig{
-		Strategy: StrategySentence,
+	chunkConfig := &schema.ChunkingConfig{
+		Strategy:          schema.StrategySentence,
 		MaxSize:  300,
 		MinSize:  30,
 		Overlap:  50,

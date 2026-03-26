@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // TestRunPerformanceTestSuite runs the complete performance test suite with reporting
@@ -79,7 +81,7 @@ func TestOptimizedPerformanceBaselines(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	for _, baseline := range optimizedBaselines {
@@ -144,7 +146,7 @@ func TestMemoryEngineResponseTimeOptimized(t *testing.T) {
 		RetryDelay:    100 * time.Millisecond,
 	}
 
-	parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+	parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -218,7 +220,7 @@ func TestCognifyPipelinePerformanceOptimized(t *testing.T) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			ctx := context.Background()

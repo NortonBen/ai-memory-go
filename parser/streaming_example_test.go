@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // ExampleStreamingParser demonstrates basic usage of the streaming parser
@@ -186,8 +188,8 @@ func ExampleStreamingParser_customConfig() {
 	}
 
 	// Custom chunking configuration
-	chunkConfig := &ChunkingConfig{
-		Strategy: StrategySentence, // Chunk by sentences
+	chunkConfig := &schema.ChunkingConfig{
+		Strategy: schema.StrategySentence, // Chunk by sentences
 		MaxSize:  500,              // 500 chars max
 		MinSize:  50,               // 50 chars min
 		Overlap:  25,               // 25 chars overlap

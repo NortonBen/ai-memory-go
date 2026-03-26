@@ -11,6 +11,7 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
@@ -30,12 +31,13 @@ func main() {
 
 	// ─── 1. OpenRouter Embedder ───────────────────────────────────────────────
 	// Using OpenRouter for embeddings
-	openRouterEmb := vector.NewOpenRouterEmbeddingProvider(vector.OpenRouterConfig{
-		APIKey:  openRouterApiKey,
-		Model:   "openai/text-embedding-3-small", // Common model available on OpenRouter
-		SiteURL: "http://localhost",
-		AppName: "KnowledgeBot",
+	embFactory := registry.NewEmbeddingProviderFactory()
+	openRouterEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:   extractor.EmbeddingProviderOpenRouter,
+		APIKey: openRouterApiKey,
+		Model:  "openai/text-embedding-3-small", // Common model available on OpenRouter
 	})
+	must(err, "openrouter embedding provider")
 	cache := vector.NewInMemoryEmbeddingCache()
 	embedder := vector.NewAutoEmbedder("openrouter", cache)
 	embedder.AddProvider("openrouter", openRouterEmb)
@@ -59,11 +61,12 @@ func main() {
 
 	// ─── 3. OpenRouter Extractor ──────────────────────────────────────────────
 	// Using OpenRouter for extraction with a cheap but capable model
-	openRouterProvider, err := extractor.NewOpenRouterProvider(
-		openRouterApiKey,
-		"openrouter/free",
-		"http://localhost",
-		"KnowledgeBot")
+	llmFactory := registry.NewProviderFactory()
+	openRouterProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:   extractor.ProviderOpenRouter,
+		APIKey: openRouterApiKey,
+		Model:  "openrouter/free",
+	})
 	must(err, "openrouter provider")
 	llmExt := extractor.NewBasicExtractor(openRouterProvider, nil)
 

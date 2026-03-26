@@ -11,6 +11,8 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // TestCPUProfiling tests CPU profiling integration for performance analysis
@@ -38,7 +40,7 @@ func TestCPUProfiling(t *testing.T) {
 		{
 			"UnifiedParser_Sequential",
 			func() Parser {
-				return NewUnifiedParser(DefaultChunkingConfig())
+				return NewUnifiedParser(schema.DefaultChunkingConfig())
 			},
 			func(p Parser) {
 				if up, ok := p.(*UnifiedParser); ok {
@@ -56,7 +58,7 @@ func TestCPUProfiling(t *testing.T) {
 					RetryAttempts: 1,
 					RetryDelay:    100 * time.Millisecond,
 				}
-				return NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+				return NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			},
 			func(p Parser) {
 				if up, ok := p.(*UnifiedParser); ok {
@@ -73,7 +75,7 @@ func TestCPUProfiling(t *testing.T) {
 					Policy:          PolicyLRU,
 					CleanupInterval: 2 * time.Minute,
 				}
-				return NewCachedUnifiedParser(DefaultChunkingConfig(), cacheConfig)
+				return NewCachedUnifiedParser(schema.DefaultChunkingConfig(), cacheConfig)
 			},
 			func(p Parser) {
 				if cp, ok := p.(*CachedUnifiedParser); ok {
@@ -160,7 +162,7 @@ func TestMemoryProfiling(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			testFiles := createProfilingTestFiles(t, tempDir, tc.fileCount, tc.wordCount)
-			parser := NewUnifiedParser(DefaultChunkingConfig())
+			parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 			defer parser.Close()
 
 			// Create memory profile before
@@ -255,7 +257,7 @@ func TestGoroutineProfiling(t *testing.T) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			// Create goroutine profile before
@@ -353,7 +355,7 @@ func TestBlockingProfiling(t *testing.T) {
 				RetryDelay:    100 * time.Millisecond,
 			}
 
-			parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+			parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 			defer parser.Close()
 
 			// Run parsing operations
@@ -432,7 +434,7 @@ func TestMutexProfiling(t *testing.T) {
 				CleanupInterval: 2 * time.Minute,
 			}
 
-			parser := NewCachedUnifiedParser(DefaultChunkingConfig(), cacheConfig)
+			parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), cacheConfig)
 			defer parser.Close()
 
 			// Run concurrent parsing to create mutex contention
@@ -496,14 +498,14 @@ func TestAllocationProfiling(t *testing.T) {
 	// Test different chunking strategies for allocation patterns
 	strategies := []struct {
 		name     string
-		strategy ChunkingStrategy
-		config   *ChunkingConfig
+		strategy schema.ChunkingStrategy
+		config   *schema.ChunkingConfig
 	}{
 		{
 			"Paragraph_Small",
-			StrategyParagraph,
-			&ChunkingConfig{
-				Strategy: StrategyParagraph,
+			schema.StrategyParagraph,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyParagraph,
 				MaxSize:  500,
 				MinSize:  50,
 				Overlap:  50,
@@ -511,9 +513,9 @@ func TestAllocationProfiling(t *testing.T) {
 		},
 		{
 			"FixedSize_Large",
-			StrategyFixedSize,
-			&ChunkingConfig{
-				Strategy: StrategyFixedSize,
+			schema.StrategyFixedSize,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategyFixedSize,
 				MaxSize:  2000,
 				MinSize:  200,
 				Overlap:  200,
@@ -521,9 +523,9 @@ func TestAllocationProfiling(t *testing.T) {
 		},
 		{
 			"Sentence_Medium",
-			StrategySentence,
-			&ChunkingConfig{
-				Strategy: StrategySentence,
+			schema.StrategySentence,
+			&schema.ChunkingConfig{
+				Strategy: schema.StrategySentence,
 				MaxSize:  1000,
 				MinSize:  100,
 				Overlap:  100,

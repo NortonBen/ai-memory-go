@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func TestWorkerPoolIntegration(t *testing.T) {
 			RetryDelay:    100 * time.Millisecond,
 		}
 
-		parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+		parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 		defer parser.Close()
 
 		// Start worker pool
@@ -84,7 +85,7 @@ func TestWorkerPoolIntegration(t *testing.T) {
 	})
 
 	t.Run("ErrorHandling", func(t *testing.T) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		// Mix valid and invalid files
@@ -106,7 +107,7 @@ func TestWorkerPoolIntegration(t *testing.T) {
 	})
 
 	t.Run("PerformanceComparison", func(t *testing.T) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		ctx := context.Background()
@@ -116,7 +117,7 @@ func TestWorkerPoolIntegration(t *testing.T) {
 
 		// Sequential processing
 		startTime := time.Now()
-		sequentialResults := make(map[string][]Chunk)
+		sequentialResults := make(map[string][]*schema.Chunk)
 		for _, filePath := range validFiles {
 			chunks, err := parser.ParseFile(ctx, filePath)
 			require.NoError(t, err)
@@ -162,7 +163,7 @@ func TestWorkerPoolResourceManagement(t *testing.T) {
 			RetryDelay:    100 * time.Millisecond,
 		}
 
-		parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+		parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 
 		// Start and verify health
 		require.NoError(t, parser.StartWorkerPool())
@@ -184,7 +185,7 @@ func TestWorkerPoolResourceManagement(t *testing.T) {
 	})
 
 	t.Run("MultipleStartStop", func(t *testing.T) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		// Multiple start/stop cycles

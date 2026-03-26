@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 func TestNewPDFParser(t *testing.T) {
@@ -16,11 +18,11 @@ func TestNewPDFParser(t *testing.T) {
 	parser := NewPDFParser(nil)
 	assert.NotNil(t, parser)
 	assert.NotNil(t, parser.config)
-	assert.Equal(t, StrategyParagraph, parser.config.Strategy)
+	assert.Equal(t, schema.StrategyParagraph, parser.config.Strategy)
 
 	// Test with custom config
-	config := &ChunkingConfig{
-		Strategy: StrategySentence,
+	config := &schema.ChunkingConfig{
+		Strategy: schema.StrategySentence,
 		MaxSize:  500,
 		MinSize:  25,
 	}
@@ -84,8 +86,8 @@ func TestPDFParser_ParsePDF_EmptyPDF(t *testing.T) {
 }
 
 func TestPDFParser_textToChunks(t *testing.T) {
-	config := &ChunkingConfig{
-		Strategy: StrategyParagraph,
+	config := &schema.ChunkingConfig{
+		Strategy: schema.StrategyParagraph,
 		MaxSize:  100,
 		MinSize:  10,
 		Overlap:  20,
@@ -108,7 +110,7 @@ func TestPDFParser_textToChunks(t *testing.T) {
 
 	// Verify chunk properties
 	for _, chunk := range chunks {
-		assert.Equal(t, ChunkTypePDF, chunk.Type)
+		assert.Equal(t, schema.ChunkTypePDF, chunk.Type)
 		assert.Equal(t, source, chunk.Source)
 		assert.NotEmpty(t, chunk.ID)
 		assert.NotEmpty(t, chunk.Hash)
@@ -168,8 +170,8 @@ func TestPDFMetadata(t *testing.T) {
 
 func TestTextParser_ParsePDF_Integration(t *testing.T) {
 	// Test the integration between TextParser and PDFParser
-	config := &ChunkingConfig{
-		Strategy: StrategyParagraph,
+	config := &schema.ChunkingConfig{
+		Strategy: schema.StrategyParagraph,
 		MaxSize:  200,
 		MinSize:  20,
 	}

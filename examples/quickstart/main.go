@@ -11,9 +11,11 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
+	_ "github.com/NortonBen/ai-memory-go/storage/adapters/sqlite"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -38,7 +40,13 @@ func main() {
 	// })
 	//
 	// Option D: LM Studio (local, free, OpenAI-compatible API)
-	lmstudioEmb := vector.NewLMStudioEmbeddingProvider("http://localhost:1234/v1", "text-embedding-nomic-embed-text-v1.5")
+	embFactory := registry.NewEmbeddingProviderFactory()
+	lmstudioEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:     extractor.EmbeddingProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "text-embedding-nomic-embed-text-v1.5",
+	})
+	must(err, "embedding provider")
 
 	// AutoEmbedder: primary = lmstudio
 	cache := vector.NewInMemoryEmbeddingCache()
@@ -82,7 +90,13 @@ func main() {
 	// llmExt := extractor.NewBasicExtractor(dsProvider, nil)
 	//
 	// Option D: LM Studio (local, free, OpenAI-compatible API)
-	lmstudioProvider, _ := extractor.NewLMStudioProvider("http://localhost:1234/v1", "qwen/qwen3-4b-2507")
+	llmFactory := registry.NewProviderFactory()
+	lmstudioProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:     extractor.ProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "qwen/qwen3-4b-2507",
+	})
+	must(err, "llm provider")
 	llmExt := extractor.NewBasicExtractor(lmstudioProvider, nil)
 
 	// ─── 4. Memory Engine ─────────────────────────────────────────────────────

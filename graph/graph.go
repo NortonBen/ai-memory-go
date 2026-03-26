@@ -4,6 +4,9 @@ package graph
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"strings"
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/schema"
@@ -51,10 +54,52 @@ type GraphStore interface {
 type GraphStoreType string
 
 const (
-	StoreTypeNeo4j    GraphStoreType = "neo4j"
-	StoreTypeSQLite   GraphStoreType = "sqlite"
-	StoreTypeInMemory GraphStoreType = "inmemory"
+	StoreTypeNeo4j     GraphStoreType = "neo4j"
+	StoreTypeSurrealDB GraphStoreType = "surrealdb"
+	StoreTypeKuzu      GraphStoreType = "kuzu"
+	StoreTypeInMemory  GraphStoreType = "inmemory"
+	StoreTypeFalkorDB  GraphStoreType = "falkordb"
+	StoreTypeRedis     GraphStoreType = "redis"
+	StoreTypeSQLite    GraphStoreType = "sqlite"
 )
+
+// StoreFactory is a function that creates a GraphStore from a config
+type StoreFactory func(config *GraphConfig) (GraphStore, error)
+
+var (
+	storeRegistry = make(map[GraphStoreType]StoreFactory)
+	registryMu    sync.RWMutex
+)
+
+// RegisterStore registers a graph store factory
+func RegisterStore(storeType GraphStoreType, factory StoreFactory) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	storeRegistry[storeType] = factory
+}
+
+// GetRegisteredStores returns all registered store types
+func GetRegisteredStores() []GraphStoreType {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	types := make([]GraphStoreType, 0, len(storeRegistry))
+	for t := range storeRegistry {
+		types = append(types, t)
+	}
+	return types
+}
+
+// NewStore creates a graph store from a config using the registry
+func NewStore(config *GraphConfig) (GraphStore, error) {
+	registryMu.RLock()
+	factory, exists := storeRegistry[config.Type]
+	registryMu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("unsupported graph store type: %s", config.Type)
+	}
+	return factory(config)
+}
 
 // GraphConfig holds configuration for graph stores
 type GraphConfig struct {
@@ -75,6 +120,116 @@ type GraphConfig struct {
 	BatchSize      int  `json:"batch_size"`
 	EnableIndexing bool `json:"enable_indexing"`
 	EnableCaching  bool `json:"enable_caching"`
+
+	// Provider-specific configurations
+	Neo4j     *Neo4jConfig     `json:"neo4j,omitempty"`
+	SurrealDB *SurrealDBConfig `json:"surrealdb,omitempty"`
+	Kuzu      *KuzuConfig      `json:"kuzu,omitempty"`
+	FalkorDB  *FalkorDBConfig  `json:"falkordb,omitempty"`
+}
+
+// Neo4j-specific configuration
+type Neo4jConfig struct {
+	URI                   string        `json:"uri"`
+	Realm                 string        `json:"realm,omitempty"`
+	UserAgent             string        `json:"user_agent,omitempty"`
+	MaxConnectionLife     time.Duration `json:"max_connection_life"`
+	MaxConnectionPool     int           `json:"max_connection_pool"`
+	ConnectionTimeout     time.Duration `json:"connection_timeout"`
+	SocketTimeout         time.Duration `json:"socket_timeout"`
+	EncryptionLevel       string        `json:"encryption_level"` // none, required, strict
+	TrustStrategy         string        `json:"trust_strategy"`   // trust_all_certificates, trust_system_ca_signed_certificates
+	ServerAddressResolver string        `json:"server_address_resolver,omitempty"`
+
+	// Neo4j-specific features
+	EnableBookmarks  bool   `json:"enable_bookmarks"`
+	EnableRouting    bool   `json:"enable_routing"`
+	EnableMetrics    bool   `json:"enable_metrics"`
+	DefaultDatabase  string `json:"default_database,omitempty"`
+	ImpersonatedUser string `json:"impersonated_user,omitempty"`
+}
+
+// SurrealDB-specific configuration
+type SurrealDBConfig struct {
+	Endpoint  string `json:"endpoint"`
+	Namespace string `json:"namespace"`
+	Database  string `json:"database"`
+	Scope     string `json:"scope,omitempty"`
+
+	// Authentication
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Token    string `json:"token,omitempty"`
+
+	// Connection settings
+	Timeout        time.Duration `json:"timeout"`
+	MaxConnections int           `json:"max_connections"`
+	EnableTLS      bool          `json:"enable_tls"`
+	TLSConfig      *TLSConfig    `json:"tls_config,omitempty"`
+
+	// SurrealDB-specific features
+	EnableLivequeries  bool `json:"enable_livequeries"`
+	EnableTransactions bool `json:"enable_transactions"`
+	StrictMode         bool `json:"strict_mode"`
+}
+
+// Kuzu-specific configuration
+type KuzuConfig struct {
+	DatabasePath      string `json:"database_path"`
+	BufferPoolSize    int64  `json:"buffer_pool_size"` // in bytes
+	MaxNumThreads     int    `json:"max_num_threads"`
+	EnableCompression bool   `json:"enable_compression"`
+
+	// Kuzu-specific settings
+	CheckpointWaitTimeout time.Duration `json:"checkpoint_wait_timeout"`
+	EnableCheckpoint      bool          `json:"enable_checkpoint"`
+	LogLevel              string        `json:"log_level"` // debug, info, warn, error
+
+	// Performance tuning
+	HashJoinSizeRatio float64 `json:"hash_join_size_ratio"`
+	EnableSemiMask    bool    `json:"enable_semi_mask"`
+	EnableZoneMap     bool    `json:"enable_zone_map"`
+	EnableProgressBar bool    `json:"enable_progress_bar"`
+}
+
+// FalkorDB-specific configuration (Redis-based graph database)
+type FalkorDBConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Password string `json:"password,omitempty"`
+	Database int    `json:"database"` // Redis database number
+
+	// Connection pooling
+	PoolSize           int           `json:"pool_size"`
+	MinIdleConns       int           `json:"min_idle_conns"`
+	MaxConnAge         time.Duration `json:"max_conn_age"`
+	PoolTimeout        time.Duration `json:"pool_timeout"`
+	IdleTimeout        time.Duration `json:"idle_timeout"`
+	IdleCheckFrequency time.Duration `json:"idle_check_frequency"`
+
+	// Redis/FalkorDB-specific
+	MaxRetries      int           `json:"max_retries"`
+	MinRetryBackoff time.Duration `json:"min_retry_backoff"`
+	MaxRetryBackoff time.Duration `json:"max_retry_backoff"`
+	DialTimeout     time.Duration `json:"dial_timeout"`
+	ReadTimeout     time.Duration `json:"read_timeout"`
+	WriteTimeout    time.Duration `json:"write_timeout"`
+
+	// TLS configuration
+	TLSConfig *TLSConfig `json:"tls_config,omitempty"`
+}
+
+// TLS configuration for secure connections
+type TLSConfig struct {
+	Enabled            bool     `json:"enabled"`
+	CertFile           string   `json:"cert_file,omitempty"`
+	KeyFile            string   `json:"key_file,omitempty"`
+	CAFile             string   `json:"ca_file,omitempty"`
+	ServerName         string   `json:"server_name,omitempty"`
+	InsecureSkipVerify bool     `json:"insecure_skip_verify"`
+	MinVersion         string   `json:"min_version,omitempty"` // 1.0, 1.1, 1.2, 1.3
+	MaxVersion         string   `json:"max_version,omitempty"`
+	CipherSuites       []string `json:"cipher_suites,omitempty"`
 }
 
 // DefaultGraphConfig returns sensible defaults
@@ -179,4 +334,51 @@ type GraphTransaction interface {
 type TransactionalGraphStore interface {
 	GraphStore
 	BeginTransaction(ctx context.Context) (GraphTransaction, error)
+}
+
+// NewSQLiteGraphStore creates a new SQLite-based graph store (legacy facade)
+func NewSQLiteGraphStore(dbPath string) (GraphStore, error) {
+	return NewStore(&GraphConfig{
+		Type:     StoreTypeSQLite,
+		Database: dbPath,
+	})
+}
+
+// NewInMemoryGraphStore creates a new in-memory graph store (legacy facade)
+func NewInMemoryGraphStore() GraphStore {
+	store, _ := NewStore(&GraphConfig{
+		Type: StoreTypeInMemory,
+	})
+	return store
+}
+
+// NewRedisGraphStore creates a new Redis-based graph store (legacy facade)
+func NewRedisGraphStore(endpoint, password string) (GraphStore, error) {
+	// Handle endpoint as host:port or just host
+	host := endpoint
+	port := 6379
+	if parts := strings.Split(endpoint, ":"); len(parts) == 2 {
+		host = parts[0]
+		fmt.Sscanf(parts[1], "%d", &port)
+	}
+
+	return NewStore(&GraphConfig{
+		Type:     StoreTypeRedis,
+		Host:     host,
+		Port:     port,
+		Password: password,
+	})
+}
+
+// NewNeo4jStore creates a new Neo4j-based graph store (legacy facade)
+func NewNeo4jStore(uri, user, password string) (GraphStore, error) {
+	return NewStore(&GraphConfig{
+		Type: StoreTypeNeo4j,
+		Host: uri,
+		Neo4j: &Neo4jConfig{
+			URI: uri,
+		},
+		Username: user,
+		Password: password,
+	})
 }

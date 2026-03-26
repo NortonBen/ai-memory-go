@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +44,7 @@ func TestWorkerPoolConfig(t *testing.T) {
 }
 
 func TestWorkerPoolLifecycle(t *testing.T) {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	config := &WorkerPoolConfig{
 		NumWorkers:    2,
 		QueueSize:     10,
@@ -90,7 +91,7 @@ func TestWorkerPoolProcessing(t *testing.T) {
 	tempDir := t.TempDir()
 	testFiles := createTestFiles(t, tempDir, 5)
 
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	config := &WorkerPoolConfig{
 		NumWorkers:    3,
 		QueueSize:     10,
@@ -148,7 +149,7 @@ func TestWorkerPoolConcurrency(t *testing.T) {
 	tempDir := t.TempDir()
 	testFiles := createTestFiles(t, tempDir, 20)
 
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	config := &WorkerPoolConfig{
 		NumWorkers:    4,
 		QueueSize:     25,
@@ -185,7 +186,7 @@ func TestWorkerPoolConcurrency(t *testing.T) {
 
 	t.Run("MultipleSimultaneousRequests", func(t *testing.T) {
 		var wg sync.WaitGroup
-		results := make([]map[string][]Chunk, 3)
+		results := make([]map[string][]*schema.Chunk, 3)
 		errors := make([]error, 3)
 
 		// Submit 3 concurrent batch requests
@@ -209,7 +210,7 @@ func TestWorkerPoolConcurrency(t *testing.T) {
 }
 
 func TestWorkerPoolErrorHandling(t *testing.T) {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	config := &WorkerPoolConfig{
 		NumWorkers:    2,
 		QueueSize:     5,
@@ -270,7 +271,7 @@ func TestWorkerPoolMetrics(t *testing.T) {
 	tempDir := t.TempDir()
 	testFiles := createTestFiles(t, tempDir, 3)
 
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	config := &WorkerPoolConfig{
 		NumWorkers:    2,
 		QueueSize:     10,
@@ -310,7 +311,7 @@ func TestUnifiedParserWithWorkerPool(t *testing.T) {
 	testFiles := createTestFiles(t, tempDir, 5)
 
 	t.Run("DefaultWorkerPool", func(t *testing.T) {
-		parser := NewUnifiedParser(DefaultChunkingConfig())
+		parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 		defer parser.Close()
 
 		ctx := context.Background()
@@ -335,7 +336,7 @@ func TestUnifiedParserWithWorkerPool(t *testing.T) {
 			RetryDelay:    200 * time.Millisecond,
 		}
 
-		parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+		parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 		defer parser.Close()
 
 		// Start worker pool explicitly
@@ -378,7 +379,7 @@ func BenchmarkWorkerPool(b *testing.B) {
 	tempDir := b.TempDir()
 	testFiles := createBenchmarkTestFiles(b, tempDir, 10)
 
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	b.Run("Sequential", func(b *testing.B) {

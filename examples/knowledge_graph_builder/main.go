@@ -11,6 +11,7 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
@@ -23,7 +24,12 @@ func main() {
 	_ = os.MkdirAll("./data/kg_builder", 0o750)
 
 	// ─── 1. Ollama Embedder (to avoid LMStudio limit with LLM concurrently) ─────────
-	ollamaEmb := vector.NewOllamaEmbeddingProvider("", "nomic-embed-text:latest", 768)
+	embFactory := registry.NewEmbeddingProviderFactory()
+	ollamaEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:  extractor.EmbeddingProviderOllama,
+		Model: "nomic-embed-text:latest",
+	})
+	must(err, "ollama embedding provider")
 	cache := vector.NewInMemoryEmbeddingCache()
 	embedder := vector.NewAutoEmbedder("ollama", cache)
 	embedder.AddProvider("ollama", ollamaEmb)
@@ -45,7 +51,12 @@ func main() {
 	defer relStore.Close()
 
 	// ─── 3. LM Studio Extractor ───────────────────────────────────────────────
-	lmstudioProvider, err := extractor.NewLMStudioProvider("http://localhost:1234/v1", "qwen/qwen3-4b-2507")
+	llmFactory := registry.NewProviderFactory()
+	lmstudioProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:     extractor.ProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "qwen/qwen3-4b-2507",
+	})
 	must(err, "lmstudio provider")
 	llmExt := extractor.NewBasicExtractor(lmstudioProvider, nil)
 

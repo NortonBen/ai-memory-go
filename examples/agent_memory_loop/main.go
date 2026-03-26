@@ -11,6 +11,7 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
@@ -22,7 +23,13 @@ func main() {
 	_ = os.MkdirAll("./data/agent_loop", 0o750)
 
 	// ─── 1. LM Studio Embedder ────────────────────────────────────────────────
-	lmstudioEmb := vector.NewLMStudioEmbeddingProvider("http://localhost:1234/v1", "text-embedding-nomic-embed-text-v1.5")
+	embFactory := registry.NewEmbeddingProviderFactory()
+	lmstudioEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:     extractor.EmbeddingProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "text-embedding-nomic-embed-text-v1.5",
+	})
+	must(err, "lmstudio embedding provider")
 	cache := vector.NewInMemoryEmbeddingCache()
 	embedder := vector.NewAutoEmbedder("lmstudio", cache)
 	embedder.AddProvider("lmstudio", lmstudioEmb)
@@ -44,7 +51,12 @@ func main() {
 	defer relStore.Close()
 
 	// ─── 3. LM Studio Extractor ───────────────────────────────────────────────
-	lmstudioProvider, err := extractor.NewLMStudioProvider("http://localhost:1234/v1", "qwen/qwen3-4b-2507")
+	llmFactory := registry.NewProviderFactory()
+	lmstudioProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:     extractor.ProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "qwen/qwen3-4b-2507",
+	})
 	must(err, "lmstudio provider")
 	llmExt := extractor.NewBasicExtractor(lmstudioProvider, nil)
 

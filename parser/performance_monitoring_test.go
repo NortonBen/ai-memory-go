@@ -11,6 +11,8 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // PerformanceMetrics holds comprehensive performance data
@@ -23,9 +25,9 @@ type PerformanceMetrics struct {
 	AllocationsPerOp  int64             `json:"allocations_per_op"`
 	GCPauses          []time.Duration   `json:"gc_pauses"`
 	CPUUsagePercent   float64           `json:"cpu_usage_percent"`
-	WorkerPoolMetrics WorkerPoolMetrics `json:"worker_pool_metrics"`
-	CacheMetrics      *CacheMetrics     `json:"cache_metrics,omitempty"`
-	StreamingMetrics  *StreamingMetrics `json:"streaming_metrics,omitempty"`
+	WorkerPoolMetrics schema.WorkerPoolMetrics `json:"worker_pool_metrics"`
+	CacheMetrics      *CacheMetrics            `json:"cache_metrics,omitempty"`
+	StreamingMetrics  *StreamingMetrics       `json:"streaming_metrics,omitempty"`
 }
 
 // StreamingMetrics holds streaming-specific performance data
@@ -176,7 +178,7 @@ func TestMemoryProfilingIntegration(t *testing.T) {
 	}
 
 	// Run parser operations
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -232,7 +234,7 @@ func TestCPUProfilingIntegration(t *testing.T) {
 	defer pprof.StopCPUProfile()
 
 	// Run CPU-intensive parser operations
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -294,7 +296,7 @@ func runPerformanceTestWithProfiling(t *testing.T, testName string, testFiles []
 
 // testUnifiedParserPerformance tests unified parser performance
 func testUnifiedParserPerformance(t *testing.T, testFiles []string) PerformanceMetrics {
-	parser := NewUnifiedParser(DefaultChunkingConfig())
+	parser := NewUnifiedParser(schema.DefaultChunkingConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -336,7 +338,7 @@ func testUnifiedParserPerformance(t *testing.T, testFiles []string) PerformanceM
 
 // testCachedParserPerformance tests cached parser performance
 func testCachedParserPerformance(t *testing.T, testFiles []string) PerformanceMetrics {
-	parser := NewCachedUnifiedParser(DefaultChunkingConfig(), DefaultCacheConfig())
+	parser := NewCachedUnifiedParser(schema.DefaultChunkingConfig(), schema.DefaultCacheConfig())
 	defer parser.Close()
 
 	ctx := context.Background()
@@ -387,7 +389,7 @@ func testCachedParserPerformance(t *testing.T, testFiles []string) PerformanceMe
 
 // testStreamingParserPerformance tests streaming parser performance
 func testStreamingParserPerformance(t *testing.T, testFiles []string) PerformanceMetrics {
-	parser := NewStreamingParser(DefaultStreamingConfig(), DefaultChunkingConfig())
+	parser := NewStreamingParser(schema.DefaultStreamingConfig(), schema.DefaultChunkingConfig())
 
 	ctx := context.Background()
 
@@ -422,7 +424,7 @@ func testStreamingParserPerformance(t *testing.T, testFiles []string) Performanc
 	memoryEfficiency := float64(totalBytes) / float64(memoryUsed) * 100
 
 	streamingMetrics := &StreamingMetrics{
-		BufferSize:       DefaultStreamingConfig().BufferSize,
+		BufferSize:       schema.DefaultStreamingConfig().BufferSize,
 		ChunksProcessed:  totalChunks,
 		BytesProcessed:   totalBytes,
 		ProcessingTime:   duration,
@@ -441,7 +443,7 @@ func testStreamingParserPerformance(t *testing.T, testFiles []string) Performanc
 
 // testWorkerPoolScalingPerformance tests worker pool scaling performance
 func testWorkerPoolScalingPerformance(t *testing.T, testFiles []string) PerformanceMetrics {
-	config := &WorkerPoolConfig{
+	config := &schema.WorkerPoolConfig{
 		NumWorkers:    runtime.NumCPU(),
 		QueueSize:     len(testFiles) * 2,
 		Timeout:       30 * time.Second,
@@ -449,7 +451,7 @@ func testWorkerPoolScalingPerformance(t *testing.T, testFiles []string) Performa
 		RetryDelay:    100 * time.Millisecond,
 	}
 
-	parser := NewUnifiedParserWithWorkerPool(DefaultChunkingConfig(), config)
+	parser := NewUnifiedParserWithWorkerPool(schema.DefaultChunkingConfig(), config)
 	defer parser.Close()
 
 	ctx := context.Background()

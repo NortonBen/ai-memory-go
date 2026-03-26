@@ -4,6 +4,10 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/schema"
+	"github.com/NortonBen/ai-memory-go/vector"
 )
 
 func TestPooledStorageManagerIntegration(t *testing.T) {
@@ -19,15 +23,15 @@ func TestPooledStorageManagerIntegration(t *testing.T) {
 			MaxLifetime:    1 * time.Hour,
 			BatchSize:      100,
 		},
-		Graph: &GraphConfig{
-			Type:           GraphStoreTypeInMemory,
+		Graph: &graph.GraphConfig{
+			Type:           graph.StoreTypeInMemory,
 			MaxConnections: 3,
 			ConnTimeout:    10 * time.Second,
 			IdleTimeout:    5 * time.Minute,
 			BatchSize:      50,
 		},
-		Vector: &VectorConfig{
-			Type:           VectorStoreTypeInMemory,
+		Vector: &vector.VectorConfig{
+			Type:           vector.StoreTypeInMemory,
 			Dimension:      768,
 			DistanceMetric: "cosine",
 			MaxConnections: 3,
@@ -191,8 +195,9 @@ func TestPooledStorageManagerIntegration(t *testing.T) {
 
 func TestPooledStorageManagerConfiguration(t *testing.T) {
 	// Test with file-based configuration
+	tempDir := t.TempDir()
 	factory := NewConfigFactory()
-	config := factory.CreateFileBasedConfig("./test_data")
+	config := factory.CreateFileBasedConfig(tempDir)
 
 	manager, err := NewPooledStorageManager(config)
 	if err != nil {
@@ -201,8 +206,9 @@ func TestPooledStorageManagerConfiguration(t *testing.T) {
 	defer manager.Close()
 
 	// Test health
-	if !manager.IsHealthy() {
-		t.Error("File-based manager should be healthy")
+	report := manager.GetHealthReport(context.Background())
+	if report.OverallStatus != HealthStatusHealthy {
+		t.Errorf("File-based manager should be healthy, report: %+v", report)
 	}
 }
 
@@ -218,14 +224,14 @@ func TestPooledStorageManagerFailover(t *testing.T) {
 			IdleTimeout:    1 * time.Minute,
 			MaxLifetime:    10 * time.Minute,
 		},
-		Graph: &GraphConfig{
-			Type:           GraphStoreTypeInMemory,
+		Graph: &graph.GraphConfig{
+			Type:           graph.StoreTypeInMemory,
 			MaxConnections: 2,
 			ConnTimeout:    1 * time.Second,
 			IdleTimeout:    1 * time.Minute,
 		},
-		Vector: &VectorConfig{
-			Type:           VectorStoreTypeInMemory,
+		Vector: &vector.VectorConfig{
+			Type:           vector.StoreTypeInMemory,
 			Dimension:      768,
 			MaxConnections: 2,
 			ConnTimeout:    1 * time.Second,
@@ -243,9 +249,7 @@ func TestPooledStorageManagerFailover(t *testing.T) {
 	ctx := context.Background()
 
 	// Get all available connections
-	var relConns []Connection
-	var graphConns []Connection
-	var vectorConns []Connection
+	var relConns []schema.Connection
 
 	// Exhaust relational pool
 	for i := 0; i < 2; i++ {
@@ -279,11 +283,8 @@ func TestPooledStorageManagerFailover(t *testing.T) {
 	manager.PutRelationalConnection(conn)
 
 	// Clean up
-	for _, conn := range graphConns {
-		manager.PutGraphConnection(conn)
-	}
-	for _, conn := range vectorConns {
-		manager.PutVectorConnection(conn)
+	for _, conn := range relConns {
+		_ = conn // Already returned
 	}
 }
 

@@ -13,99 +13,33 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 // CachePolicy defines different cache eviction policies
-type CachePolicy string
+type CachePolicy = schema.CachePolicy
 
 const (
-	PolicyLRU  CachePolicy = "lru"  // Least Recently Used
-	PolicyLFU  CachePolicy = "lfu"  // Least Frequently Used
-	PolicyTTL  CachePolicy = "ttl"  // Time To Live based
-	PolicyFIFO CachePolicy = "fifo" // First In First Out
+	PolicyLRU  = schema.PolicyLRU
+	PolicyLFU  = schema.PolicyLFU
+	PolicyTTL  = schema.PolicyTTL
+	PolicyFIFO = schema.PolicyFIFO
 )
 
-// CacheConfig configures the parsing cache behavior
-type CacheConfig struct {
-	// MaxSize is the maximum number of entries to cache
-	MaxSize int `json:"max_size"`
-
-	// MaxMemoryMB is the maximum memory usage in megabytes
-	MaxMemoryMB int64 `json:"max_memory_mb"`
-
-	// TTL is the default time-to-live for cache entries
-	TTL time.Duration `json:"ttl"`
-
-	// Policy determines the eviction strategy
-	Policy CachePolicy `json:"policy"`
-
-	// EnablePersistence enables cache persistence across sessions
-	EnablePersistence bool `json:"enable_persistence"`
-
-	// PersistencePath is the file path for cache persistence
-	PersistencePath string `json:"persistence_path"`
-
-	// CheckFileModTime enables file modification time checking
-	CheckFileModTime bool `json:"check_file_mod_time"`
-
-	// EnableMetrics enables cache hit/miss metrics collection
-	EnableMetrics bool `json:"enable_metrics"`
-
-	// CleanupInterval determines how often to run cache cleanup
-	CleanupInterval time.Duration `json:"cleanup_interval"`
-
-	// EnableCompression enables content compression to save memory
-	EnableCompression bool `json:"enable_compression"`
-
-	// CompressionThreshold minimum content size to trigger compression (bytes)
-	CompressionThreshold int `json:"compression_threshold"`
-
-	// EnableAsyncPersistence enables background persistence operations
-	EnableAsyncPersistence bool `json:"enable_async_persistence"`
-
-	// PersistenceInterval how often to persist cache to disk
-	PersistenceInterval time.Duration `json:"persistence_interval"`
-
-	// EnableWarmup enables cache warmup on startup
-	EnableWarmup bool `json:"enable_warmup"`
-
-	// WarmupFiles list of files to preload into cache
-	WarmupFiles []string `json:"warmup_files"`
-
-	// MaxConcurrentOperations limits concurrent cache operations
-	MaxConcurrentOperations int `json:"max_concurrent_operations"`
-
-	// EnableDistributedCache enables distributed caching (future extension)
-	EnableDistributedCache bool `json:"enable_distributed_cache"`
-}
+// CacheConfig is an alias for schema.CacheConfig to maintain some backward compatibility if needed locally,
+// but we prefer using schema.CacheConfig directly.
+type CacheConfig = schema.CacheConfig
 
 // DefaultCacheConfig returns sensible defaults for cache configuration
-func DefaultCacheConfig() *CacheConfig {
-	return &CacheConfig{
-		MaxSize:                 1000,
-		MaxMemoryMB:             100, // 100MB default
-		TTL:                     24 * time.Hour,
-		Policy:                  PolicyLRU,
-		EnablePersistence:       false,
-		PersistencePath:         ".cache/parser_cache.json",
-		CheckFileModTime:        true,
-		EnableMetrics:           true,
-		CleanupInterval:         5 * time.Minute,
-		EnableCompression:       true,
-		CompressionThreshold:    1024, // 1KB
-		EnableAsyncPersistence:  true,
-		PersistenceInterval:     10 * time.Minute,
-		EnableWarmup:            false,
-		WarmupFiles:             []string{},
-		MaxConcurrentOperations: 100,
-		EnableDistributedCache:  false,
-	}
+func DefaultCacheConfig() *schema.CacheConfig {
+	return schema.DefaultCacheConfig()
 }
 
 // CacheEntry represents a cached parsing result
 type CacheEntry struct {
 	Key            string                 `json:"key"`
-	Chunks         []Chunk                `json:"chunks"`
+	Chunks         []*schema.Chunk         `json:"chunks"`
 	Metadata       map[string]interface{} `json:"metadata"`
 	CreatedAt      time.Time              `json:"created_at"`
 	LastAccessed   time.Time              `json:"last_accessed"`
@@ -121,42 +55,25 @@ type CacheEntry struct {
 	Tags           []string               `json:"tags"`     // For categorization and bulk operations
 }
 
-// CacheMetrics tracks cache performance
-type CacheMetrics struct {
-	Hits                    int64         `json:"hits"`
-	Misses                  int64         `json:"misses"`
-	Evictions               int64         `json:"evictions"`
-	TotalEntries            int64         `json:"total_entries"`
-	MemoryUsageBytes        int64         `json:"memory_usage_bytes"`
-	HitRate                 float64       `json:"hit_rate"`
-	AverageAccessTime       time.Duration `json:"average_access_time"`
-	LastCleanup             time.Time     `json:"last_cleanup"`
-	CompressionRatio        float64       `json:"compression_ratio"`
-	PersistenceOperations   int64         `json:"persistence_operations"`
-	LastPersistence         time.Time     `json:"last_persistence"`
-	ConcurrentOperations    int64         `json:"concurrent_operations"`
-	MaxConcurrentOperations int64         `json:"max_concurrent_operations"`
-	WarmupTime              time.Duration `json:"warmup_time"`
-	ErrorCount              int64         `json:"error_count"`
-	mu                      sync.RWMutex
-}
+// CacheMetrics is an alias for schema.CacheMetrics
+type CacheMetrics = schema.CacheMetrics
 
 // ParsingCache defines the interface for parsing result caching
 type ParsingCache interface {
 	// Get retrieves cached parsing results
-	Get(ctx context.Context, key string) ([]Chunk, bool)
+	Get(ctx context.Context, key string) ([]*schema.Chunk, bool)
 
 	// Set stores parsing results in cache
-	Set(ctx context.Context, key string, chunks []Chunk, metadata map[string]interface{}) error
+	Set(ctx context.Context, key string, chunks []*schema.Chunk, metadata map[string]interface{}) error
 
 	// SetWithOptions stores parsing results with advanced options
-	SetWithOptions(ctx context.Context, key string, chunks []Chunk, metadata map[string]interface{}, options *CacheEntryOptions) error
+	SetWithOptions(ctx context.Context, key string, chunks []*schema.Chunk, metadata map[string]interface{}, options *CacheEntryOptions) error
 
 	// GetByFile retrieves cached results for a specific file
-	GetByFile(ctx context.Context, filePath string) ([]Chunk, bool)
+	GetByFile(ctx context.Context, filePath string) ([]*schema.Chunk, bool)
 
 	// SetByFile stores parsing results for a specific file
-	SetByFile(ctx context.Context, filePath string, chunks []Chunk, metadata map[string]interface{}) error
+	SetByFile(ctx context.Context, filePath string, chunks []*schema.Chunk, metadata map[string]interface{}) error
 
 	// Delete removes an entry from cache
 	Delete(ctx context.Context, key string) error
@@ -171,7 +88,7 @@ type ParsingCache interface {
 	IsValid(ctx context.Context, key string) bool
 
 	// GetMetrics returns current cache performance metrics
-	GetMetrics() *CacheMetrics
+	GetMetrics() *schema.CacheMetrics
 
 	// Cleanup removes expired and evicted entries
 	Cleanup(ctx context.Context) error
@@ -239,9 +156,9 @@ func (gc *GzipCompressor) Decompress(data []byte) ([]byte, error) {
 
 // InMemoryParsingCache implements ParsingCache using in-memory storage
 type InMemoryParsingCache struct {
-	config  *CacheConfig
+	config  *schema.CacheConfig
 	entries map[string]*CacheEntry
-	metrics *CacheMetrics
+	metrics *schema.CacheMetrics
 	mu      sync.RWMutex
 
 	// LRU tracking
@@ -274,7 +191,7 @@ type lruNode struct {
 }
 
 // NewInMemoryParsingCache creates a new in-memory parsing cache
-func NewInMemoryParsingCache(config *CacheConfig) *InMemoryParsingCache {
+func NewInMemoryParsingCache(config *schema.CacheConfig) *InMemoryParsingCache {
 	if config == nil {
 		config = DefaultCacheConfig()
 	}
@@ -282,7 +199,7 @@ func NewInMemoryParsingCache(config *CacheConfig) *InMemoryParsingCache {
 	cache := &InMemoryParsingCache{
 		config:          config,
 		entries:         make(map[string]*CacheEntry),
-		metrics:         &CacheMetrics{},
+		metrics:         &schema.CacheMetrics{},
 		lruMap:          make(map[string]*lruNode),
 		tagIndex:        make(map[string]map[string]bool),
 		stopCleanup:     make(chan struct{}),
@@ -338,12 +255,12 @@ func (c *InMemoryParsingCache) generateFileKey(filePath string) string {
 }
 
 // Get retrieves cached parsing results
-func (c *InMemoryParsingCache) Get(ctx context.Context, key string) ([]Chunk, bool) {
+func (c *InMemoryParsingCache) Get(ctx context.Context, key string) ([]*schema.Chunk, bool) {
 	startTime := time.Now()
 	defer func() {
-		c.metrics.mu.Lock()
+		c.metrics.Mu.Lock()
 		c.metrics.AverageAccessTime = (c.metrics.AverageAccessTime + time.Since(startTime)) / 2
-		c.metrics.mu.Unlock()
+		c.metrics.Mu.Unlock()
 	}()
 
 	c.mu.RLock()
@@ -378,22 +295,22 @@ func (c *InMemoryParsingCache) Get(ctx context.Context, key string) ([]Chunk, bo
 	}
 
 	// Handle compressed data
-	var chunks []Chunk
+	var chunks []*schema.Chunk
 	if entry.IsCompressed && len(entry.CompressedData) > 0 {
 		decompressed, err := c.compressor.Decompress(entry.CompressedData)
 		if err != nil {
 			c.recordMiss()
-			c.metrics.mu.Lock()
+			c.mu.Lock()
 			c.metrics.ErrorCount++
-			c.metrics.mu.Unlock()
+			c.mu.Unlock()
 			return nil, false
 		}
 
 		if err := json.Unmarshal(decompressed, &chunks); err != nil {
 			c.recordMiss()
-			c.metrics.mu.Lock()
+			c.mu.Lock()
 			c.metrics.ErrorCount++
-			c.metrics.mu.Unlock()
+			c.mu.Unlock()
 			return nil, false
 		}
 	} else {
@@ -414,12 +331,12 @@ func (c *InMemoryParsingCache) Get(ctx context.Context, key string) ([]Chunk, bo
 }
 
 // Set stores parsing results in cache
-func (c *InMemoryParsingCache) Set(ctx context.Context, key string, chunks []Chunk, metadata map[string]interface{}) error {
+func (c *InMemoryParsingCache) Set(ctx context.Context, key string, chunks []*schema.Chunk, metadata map[string]interface{}) error {
 	return c.SetWithOptions(ctx, key, chunks, metadata, nil)
 }
 
 // SetWithOptions stores parsing results with advanced options
-func (c *InMemoryParsingCache) SetWithOptions(ctx context.Context, key string, chunks []Chunk, metadata map[string]interface{}, options *CacheEntryOptions) error {
+func (c *InMemoryParsingCache) SetWithOptions(ctx context.Context, key string, chunks []*schema.Chunk, metadata map[string]interface{}, options *CacheEntryOptions) error {
 	if len(chunks) == 0 {
 		return fmt.Errorf("cannot cache empty chunks")
 	}
@@ -432,17 +349,17 @@ func (c *InMemoryParsingCache) SetWithOptions(ctx context.Context, key string, c
 		return ctx.Err()
 	}
 
-	c.metrics.mu.Lock()
+	c.mu.Lock()
 	c.metrics.ConcurrentOperations++
 	if c.metrics.ConcurrentOperations > c.metrics.MaxConcurrentOperations {
 		c.metrics.MaxConcurrentOperations = c.metrics.ConcurrentOperations
 	}
-	c.metrics.mu.Unlock()
+	c.mu.Unlock()
 
 	defer func() {
-		c.metrics.mu.Lock()
+		c.mu.Lock()
 		c.metrics.ConcurrentOperations--
-		c.metrics.mu.Unlock()
+		c.mu.Unlock()
 	}()
 
 	// Apply default options if not provided
@@ -466,10 +383,10 @@ func (c *InMemoryParsingCache) SetWithOptions(ctx context.Context, key string, c
 				compressedData = compressed
 				isCompressed = true
 				// Update compression ratio metric
-				c.metrics.mu.Lock()
+				c.mu.Lock()
 				ratio := float64(len(compressed)) / float64(len(chunksData))
 				c.metrics.CompressionRatio = (c.metrics.CompressionRatio + ratio) / 2
-				c.metrics.mu.Unlock()
+				c.mu.Unlock()
 			}
 		}
 	}
@@ -521,13 +438,13 @@ func (c *InMemoryParsingCache) SetWithOptions(ctx context.Context, key string, c
 }
 
 // GetByFile retrieves cached results for a specific file
-func (c *InMemoryParsingCache) GetByFile(ctx context.Context, filePath string) ([]Chunk, bool) {
+func (c *InMemoryParsingCache) GetByFile(ctx context.Context, filePath string) ([]*schema.Chunk, bool) {
 	key := c.generateFileKey(filePath)
 	return c.Get(ctx, key)
 }
 
 // SetByFile stores parsing results for a specific file
-func (c *InMemoryParsingCache) SetByFile(ctx context.Context, filePath string, chunks []Chunk, metadata map[string]interface{}) error {
+func (c *InMemoryParsingCache) SetByFile(ctx context.Context, filePath string, chunks []*schema.Chunk, metadata map[string]interface{}) error {
 	key := c.generateFileKey(filePath)
 
 	// Get file modification time
@@ -633,9 +550,9 @@ func (c *InMemoryParsingCache) IsValid(ctx context.Context, key string) bool {
 }
 
 // GetMetrics returns current cache performance metrics
-func (c *InMemoryParsingCache) GetMetrics() *CacheMetrics {
-	c.metrics.mu.RLock()
-	defer c.metrics.mu.RUnlock()
+func (c *InMemoryParsingCache) GetMetrics() *schema.CacheMetrics {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	// Calculate hit rate
 	total := c.metrics.Hits + c.metrics.Misses
@@ -644,7 +561,7 @@ func (c *InMemoryParsingCache) GetMetrics() *CacheMetrics {
 	}
 
 	// Return a copy to prevent external modification
-	return &CacheMetrics{
+	return &schema.CacheMetrics{
 		Hits:                    c.metrics.Hits,
 		Misses:                  c.metrics.Misses,
 		Evictions:               c.metrics.Evictions,
@@ -774,10 +691,10 @@ func (c *InMemoryParsingCache) Persist(ctx context.Context) error {
 		return fmt.Errorf("failed to rename cache file: %w", err)
 	}
 
-	c.metrics.mu.Lock()
+	c.metrics.Mu.Lock()
 	c.metrics.PersistenceOperations++
 	c.metrics.LastPersistence = time.Now()
-	c.metrics.mu.Unlock()
+	c.metrics.Mu.Unlock()
 
 	return nil
 }
@@ -837,9 +754,9 @@ func (c *InMemoryParsingCache) Load(ctx context.Context) error {
 func (c *InMemoryParsingCache) Warmup(ctx context.Context, filePaths []string) error {
 	startTime := time.Now()
 	defer func() {
-		c.metrics.mu.Lock()
+		c.metrics.Mu.Lock()
 		c.metrics.WarmupTime = time.Since(startTime)
-		c.metrics.mu.Unlock()
+		c.metrics.Mu.Unlock()
 	}()
 
 	// This is a placeholder - in a real implementation, you would need
@@ -929,7 +846,7 @@ func (c *InMemoryParsingCache) isFileValid(entry *CacheEntry) bool {
 }
 
 // calculateSize estimates the memory size of chunks and metadata
-func (c *InMemoryParsingCache) calculateSize(chunks []Chunk, metadata map[string]interface{}) int64 {
+func (c *InMemoryParsingCache) calculateSize(chunks []*schema.Chunk, metadata map[string]interface{}) int64 {
 	size := int64(0)
 
 	// Estimate chunk sizes
@@ -950,7 +867,7 @@ func (c *InMemoryParsingCache) calculateSize(chunks []Chunk, metadata map[string
 }
 
 // generateContentHash creates a hash of the chunks for deduplication
-func (c *InMemoryParsingCache) generateContentHash(chunks []Chunk) string {
+func (c *InMemoryParsingCache) generateContentHash(chunks []*schema.Chunk) string {
 	var content string
 	for _, chunk := range chunks {
 		content += chunk.Hash
@@ -962,18 +879,18 @@ func (c *InMemoryParsingCache) generateContentHash(chunks []Chunk) string {
 // recordHit increments hit counter
 func (c *InMemoryParsingCache) recordHit() {
 	if c.config.EnableMetrics {
-		c.metrics.mu.Lock()
+		c.mu.Lock()
 		c.metrics.Hits++
-		c.metrics.mu.Unlock()
+		c.mu.Unlock()
 	}
 }
 
 // recordMiss increments miss counter
 func (c *InMemoryParsingCache) recordMiss() {
 	if c.config.EnableMetrics {
-		c.metrics.mu.Lock()
+		c.mu.Lock()
 		c.metrics.Misses++
-		c.metrics.mu.Unlock()
+		c.mu.Unlock()
 	}
 }
 

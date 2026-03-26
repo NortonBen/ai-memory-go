@@ -11,9 +11,11 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
+	_ "github.com/NortonBen/ai-memory-go/storage/adapters/sqlite"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -28,7 +30,13 @@ func run() {
 	_ = os.MkdirAll("./data/noisy_data", 0o750)
 
 	// ─── 1. LM Studio Initialization ──────────────────────────────────────────
-	lmstudioEmb := vector.NewLMStudioEmbeddingProvider("http://localhost:1234/v1", "text-embedding-nomic-embed-text-v1.5")
+	embFactory := registry.NewEmbeddingProviderFactory()
+	lmstudioEmb, err := embFactory.CreateProvider(&extractor.EmbeddingProviderConfig{
+		Type:     extractor.EmbeddingProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "text-embedding-nomic-embed-text-v1.5",
+	})
+	must(err, "lmstudio embedding provider")
 	cache := vector.NewInMemoryEmbeddingCache()
 	embedder := vector.NewAutoEmbedder("lmstudio", cache)
 	embedder.AddProvider("lmstudio", lmstudioEmb)
@@ -51,7 +59,12 @@ func run() {
 
 	// ─── 3. LLM Extractor ─────────────────────────────────────────────────────
 	// Assuming LM Studio is running on localhost:1234 handling completion tasks
-	lmProvider, err := extractor.NewLMStudioProvider("http://localhost:1234/v1", "qwen/qwen3-4b-2507")
+	llmFactory := registry.NewProviderFactory()
+	lmProvider, err := llmFactory.CreateProvider(&extractor.ProviderConfig{
+		Type:     extractor.ProviderLMStudio,
+		Endpoint: "http://localhost:1234/v1",
+		Model:    "qwen/qwen3-4b-2507",
+	})
 	must(err, "lmstudio provider")
 
 	basicExt := extractor.NewBasicExtractor(lmProvider, &extractor.ExtractionConfig{

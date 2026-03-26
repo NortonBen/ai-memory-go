@@ -5,18 +5,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
 
 func TestUnifiedParser_PDFIntegration(t *testing.T) {
-	parser := NewUnifiedParser(nil)
+	parserObj := NewUnifiedParser(nil)
 	ctx := context.Background()
 
 	// Test PDF format detection
-	assert.True(t, parser.IsFormatSupported("test.pdf"))
-	assert.Contains(t, parser.GetSupportedFormats(), "pdf")
+	assert.True(t, parserObj.IsFormatSupported("test.pdf"))
+	assert.Contains(t, parserObj.GetSupportedFormats(), "pdf")
 
 	// Test PDF parsing through unified parser (with non-existent file)
-	chunks, err := parser.ParseFile(ctx, "nonexistent.pdf")
+	chunks, err := parserObj.ParseFile(ctx, "nonexistent.pdf")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "file does not exist")
 	assert.Nil(t, chunks)
@@ -45,7 +47,7 @@ func TestPDFParser_InterfaceCompliance(t *testing.T) {
 	assert.Error(t, err) // Expected since file doesn't exist
 
 	contentType := parser.DetectContentType("any content")
-	assert.Equal(t, ChunkTypePDF, contentType)
+	assert.Equal(t, schema.ChunkTypePDF, contentType)
 }
 
 func TestPDFParser_ErrorHandling(t *testing.T) {
@@ -111,18 +113,18 @@ func TestPDFParser_ConfigurationHandling(t *testing.T) {
 	// Test with nil config
 	parser1 := NewPDFParser(nil)
 	assert.NotNil(t, parser1.config)
-	assert.Equal(t, StrategyParagraph, parser1.config.Strategy)
+	assert.Equal(t, schema.StrategyParagraph, parser1.config.Strategy)
 
 	// Test with custom config
-	customConfig := &ChunkingConfig{
-		Strategy: StrategySentence,
+	customConfig := &schema.ChunkingConfig{
+		Strategy: schema.StrategySentence,
 		MaxSize:  500,
 		MinSize:  25,
 		Overlap:  50,
 	}
 	parser2 := NewPDFParser(customConfig)
 	assert.Equal(t, customConfig, parser2.config)
-	assert.Equal(t, StrategySentence, parser2.config.Strategy)
+	assert.Equal(t, schema.StrategySentence, parser2.config.Strategy)
 	assert.Equal(t, 500, parser2.config.MaxSize)
 }
 
