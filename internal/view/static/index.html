@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Memory Viewer</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/d3@7"></script>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #f6f8fb; color: #111827; }
+      .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .metric { min-width: 180px; }
+      button { border: 1px solid #d1d5db; background: #fff; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+      button.active { background: #111827; color: #fff; border-color: #111827; }
+      input { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 10px; min-width: 240px; }
+      pre { background: #0b1020; color: #d1e4ff; border-radius: 8px; padding: 10px; overflow: auto; max-height: 320px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+      .muted { color: #6b7280; font-size: 13px; }
+      .graph-box { width: 100%; height: 560px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+      .empty { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; color: #78350f; margin-top: 12px; }
+      code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
+      .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useEffect, useMemo, useRef, useState } = React;
+
+      async function api(path) {
+        const res = await fetch(path);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Request failed" }));
+          throw new Error(err.error || "Request failed");
+        }
+        return res.json();
+      }
+
+      function pickNodeLabel(node) {
+        const p = (node && node.properties) || {};
+        const candidates = [p.name, p.label, p.title, p.value, p.entity, p.display_name];
+        for (const c of candidates) {
+          if (typeof c === "string" && c.trim()) return c.trim();
+          if (Array.isArray(c) && c.length > 0) {
+            const first = c.find((x) => typeof x === "string" && x.trim());
+            if (first) return first.trim();
+          }
+          if (c && typeof c === "object") {
+            const inner = c.name || c.label || c.value || c.text;
+            if (typeof inner === "string" && inner.trim()) return inner.trim();
+          }
+        }
+        const fallbackID = node?.id || "node";
+        const shortID = fallbackID.length > 18 ? `${fallbackID.slice(0, 18)}...` : fallbackID;
+        return node?.type ? `${node.type}: ${shortID}` : shortID;
+      }
+
+      function App() {
+        const [tab, setTab] = useState("overview");
+        const [overview, setOverview] = useState(null);
+        const [datapoints, setDatapoints] = useState([]);
+        const [inputs, setInputs] = useState([]);
+        const [processed, setProcessed] = useState([]);
+        const [relationships, setRelationships] = useState({ nodes: [], edges: [] });
+        const [vectors, setVectors] = useState([]);
+        const [dpKindFilter, setDpKindFilter] = useState("processed");
+        const [dpStatusFilter, setDpStatusFilter] = useState("all");
+        const [inputStatusFilter, setInputStatusFilter] = useState("all");
+        const [processedStatusFilter, setProcessedStatusFilter] = useState("all");
+        const [vecKindFilter, setVecKindFilter] = useState("processed");
+        const [vecStatusFilter, setVecStatusFilter] = useState("completed");
+        const [pageSize, setPageSize] = useState(10);
+        const [datapointsTotal, setDatapointsTotal] = useState(0);
+        const [inputsTotal, setInputsTotal] = useState(0);
+        const [processedTotal, setProcessedTotal] = useState(0);
+        const [vectorsTotal, setVectorsTotal] = useState(0);
+        const [dpPage, setDpPage] = useState(1);
+        const [inputsPage, setInputsPage] = useState(1);
+        const [processedPage, setProcessedPage] = useState(1);
+        const [vectorsPage, setVectorsPage] = useState(1);
+        const [query, setQuery] = useState("");
+        const [searchResult, setSearchResult] = useState(null);
+        const [graphStats, setGraphStats] = useState(null);
+        const [graphNodeID, setGraphNodeID] = useState("");
+        const [graphNeighbors, setGraphNeighbors] = useState(null);
+        const [graphRenderMeta, setGraphRenderMeta] = useState({ renderedNodes: 0, renderedEdges: 0, groups: [] });
+        const [selectedGraphItem, setSelectedGraphItem] = useState(null);
+        const [error, setError] = useState("");
+        const graphRef = useRef(null);
+
+        const loadOverview = async () => setOverview(await api("/api/overview"));
+        const loadDataPoints = async () => {
+          const offset = (dpPage - 1) * pageSize;
+          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}`);
+          setDatapoints(resp.items || []);
+          setDatapointsTotal(resp.total || 0);
+        };
+        const loadInputs = async () => {
+          const offset = (inputsPage - 1) * pageSize;
+          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}`);
+          setInputs(resp.items || []);
+          setInputsTotal(resp.total || 0);
+        };
+        const loadProcessed = async () => {
+          const offset = (processedPage - 1) * pageSize;
+          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}`);
+          setProcessed(resp.items || []);
+          setProcessedTotal(resp.total || 0);
+        };
+        const loadRelationships = async () => setRelationships(await api("/api/relationships?limit=200"));
+        const loadVectors = async () => {
+          const offset = (vectorsPage - 1) * pageSize;
+          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}`);
+          setVectors(resp.items || []);
+          setVectorsTotal(resp.total || 0);
+        };
+        const loadGraphStats = async () => setGraphStats(await api("/api/graph/stats"));
+        const refreshAll = async () => {
+          setError("");
+          await Promise.all([loadOverview(), loadDataPoints(), loadInputs(), loadProcessed(), loadRelationships(), loadVectors(), loadGraphStats()]);
+        };
+
+        useEffect(() => {
+          (async () => {
+            try {
+              await refreshAll();
+            } catch (e) {
+              setError(e.message);
+            }
+          })();
+        }, []);
+
+        useEffect(() => {
+          setDpPage(1);
+        }, [dpKindFilter, dpStatusFilter, pageSize]);
+        useEffect(() => {
+          loadDataPoints().catch((e) => setError(e.message));
+        }, [dpKindFilter, dpStatusFilter, dpPage, pageSize]);
+
+        useEffect(() => {
+          setInputsPage(1);
+        }, [inputStatusFilter, pageSize]);
+        useEffect(() => {
+          loadInputs().catch((e) => setError(e.message));
+        }, [inputStatusFilter, inputsPage, pageSize]);
+
+        useEffect(() => {
+          setProcessedPage(1);
+        }, [processedStatusFilter, pageSize]);
+        useEffect(() => {
+          loadProcessed().catch((e) => setError(e.message));
+        }, [processedStatusFilter, processedPage, pageSize]);
+
+        useEffect(() => {
+          setVectorsPage(1);
+        }, [vecKindFilter, vecStatusFilter, pageSize]);
+        useEffect(() => {
+          loadVectors().catch((e) => setError(e.message));
+        }, [vecKindFilter, vecStatusFilter, vectorsPage, pageSize]);
+
+        const topEdges = useMemo(() => (relationships.edges || []).slice(0, 40), [relationships]);
+
+        useEffect(() => {
+          if (tab !== "graph") return;
+          if (!graphRef.current || !window.d3) return;
+
+          const d3 = window.d3;
+          const width = graphRef.current.clientWidth || 1000;
+          const height = graphRef.current.clientHeight || 560;
+          graphRef.current.innerHTML = "";
+
+          const nodeMap = new Map();
+          (relationships.nodes || []).forEach((n) => {
+            nodeMap.set(n.id, {
+              id: n.id,
+              label: pickNodeLabel(n),
+              group: n.type || "Node",
+            });
+          });
+          (relationships.edges || []).forEach((e) => {
+            if (!nodeMap.has(e.from)) nodeMap.set(e.from, { id: e.from, label: e.from, group: "Node" });
+            if (!nodeMap.has(e.to)) nodeMap.set(e.to, { id: e.to, label: e.to, group: "Node" });
+          });
+
+          const nodes = Array.from(nodeMap.values()).slice(0, 220);
+          const allow = new Set(nodes.map((n) => n.id));
+          const links = (relationships.edges || [])
+            .filter((e) => allow.has(e.from) && allow.has(e.to))
+            .slice(0, 320)
+            .map((e) => ({ source: e.from, target: e.to, type: e.type || "REL", raw: e }));
+
+          const groups = Array.from(new Set(nodes.map((n) => n.group))).sort();
+          setGraphRenderMeta({ renderedNodes: nodes.length, renderedEdges: links.length, groups });
+
+          const svg = d3.select(graphRef.current).append("svg").attr("width", width).attr("height", height);
+          const root = svg.append("g");
+          svg.call(d3.zoom().scaleExtent([0.4, 4]).on("zoom", (ev) => root.attr("transform", ev.transform)));
+
+          const color = d3.scaleOrdinal(d3.schemeCategory10);
+          const sim = d3
+            .forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id((d) => d.id).distance(70))
+            .force("charge", d3.forceManyBody().strength(-180))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+          const link = root
+            .append("g")
+            .selectAll("line")
+            .data(links)
+            .enter()
+            .append("line")
+            .attr("stroke", "#94a3b8")
+            .attr("stroke-opacity", 0.7)
+            .attr("stroke-width", 1.2)
+            .on("click", (_, d) => {
+              const sourceID = typeof d.source === "string" ? d.source : d.source.id;
+              const targetID = typeof d.target === "string" ? d.target : d.target.id;
+              setSelectedGraphItem({
+                kind: "edge",
+                id: d.raw?.id || `${sourceID}->${targetID}`,
+                source: sourceID,
+                target: targetID,
+                type: d.type,
+                weight: d.raw?.weight ?? null,
+              });
+            });
+
+          const edgeLabel = root
+            .append("g")
+            .selectAll("text")
+            .data(links)
+            .enter()
+            .append("text")
+            .attr("font-size", 10)
+            .attr("fill", "#64748b")
+            .attr("pointer-events", "none")
+            .text((d) => d.type || "");
+
+          const node = root
+            .append("g")
+            .selectAll("circle")
+            .data(nodes)
+            .enter()
+            .append("circle")
+            .attr("r", 6)
+            .attr("fill", (d) => color(d.group))
+            .on("click", (_, d) => {
+              setSelectedGraphItem({
+                kind: "node",
+                id: d.id,
+                label: d.label,
+                group: d.group,
+              });
+            })
+            .call(
+              d3
+                .drag()
+                .on("start", (ev, d) => {
+                  if (!ev.active) sim.alphaTarget(0.3).restart();
+                  d.fx = d.x;
+                  d.fy = d.y;
+                })
+                .on("drag", (ev, d) => {
+                  d.fx = ev.x;
+                  d.fy = ev.y;
+                })
+                .on("end", (ev, d) => {
+                  if (!ev.active) sim.alphaTarget(0);
+                  d.fx = null;
+                  d.fy = null;
+                })
+            );
+
+          node.append("title").text((d) => d.label);
+
+          const nodeLabel = root
+            .append("g")
+            .selectAll("text")
+            .data(nodes)
+            .enter()
+            .append("text")
+            .attr("font-size", 11)
+            .attr("fill", "#334155")
+            .attr("dx", 8)
+            .attr("dy", 3)
+            .attr("pointer-events", "none")
+            .text((d) => (d.label || "").slice(0, 26));
+
+          sim.on("tick", () => {
+            link
+              .attr("x1", (d) => d.source.x)
+              .attr("y1", (d) => d.source.y)
+              .attr("x2", (d) => d.target.x)
+              .attr("y2", (d) => d.target.y);
+            node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+            nodeLabel.attr("x", (d) => d.x).attr("y", (d) => d.y);
+            edgeLabel
+              .attr("x", (d) => (d.source.x + d.target.x) / 2)
+              .attr("y", (d) => (d.source.y + d.target.y) / 2);
+          });
+
+          return () => sim.stop();
+        }, [tab, relationships]);
+
+        async function loadNeighbors() {
+          if (!graphNodeID.trim()) return;
+          try {
+            setError("");
+            setGraphNeighbors(await api(`/api/graph/neighbors?node_id=${encodeURIComponent(graphNodeID)}&depth=2`));
+          } catch (e) {
+            setError(e.message);
+          }
+        }
+
+        async function runSearch() {
+          if (!query.trim()) return;
+          try {
+            setError("");
+            setSearchResult(await api(`/api/search?q=${encodeURIComponent(query)}&limit=8`));
+          } catch (e) {
+            setError(e.message);
+          }
+        }
+
+        return (
+          <div className="wrap">
+            <h1>AI Memory Viewer</h1>
+            <p className="muted">Preview datapoints, vectors, graph relationships, and run search directly from browser.</p>
+            {error ? <div className="card" style={{ borderColor: "#ef4444" }}>{error}</div> : null}
+
+            <div className="row" style={{ marginBottom: "16px" }}>
+              {["overview", "inputs", "processed", "datapoints", "vectors", "relationships", "graph", "search"].map((name) => (
+                <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>
+                  {name}
+                </button>
+              ))}
+              <button onClick={() => refreshAll().catch((e) => setError(e.message))}>Làm mới dữ liệu</button>
+            </div>
+
+            {tab === "inputs" && (
+              <div className="card">
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Items/page{" "}
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </label>
+                  <label>
+                    Status{" "}
+                    <select value={inputStatusFilter} onChange={(e) => setInputStatusFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="pending">pending</option>
+                      <option value="processing">processing</option>
+                      <option value="cognified">cognified</option>
+                      <option value="completed">completed</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </label>
+                  <button onClick={loadInputs}>Reload</button>
+                </div>
+                {inputs.length === 0 ? <div className="empty">Không có input records với filter status: <code>{inputStatusFilter}</code>.</div> : null}
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Content</th><th>Status</th><th>Progress</th></tr>
+                  </thead>
+                  <tbody>
+                    {inputs.map((d) => (
+                      <tr key={d.id}>
+                        <td>{d.id}</td>
+                        <td>{d.content?.slice(0, 140)}</td>
+                        <td>{d.status}</td>
+                        <td>{d.processed_chunks || 0}/{d.total_chunks || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="pager">
+                  <button disabled={inputsPage <= 1} onClick={() => setInputsPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span className="muted">Page {inputsPage} / {Math.max(1, Math.ceil(inputsTotal / pageSize))} ({inputsTotal} items)</span>
+                  <button
+                    disabled={inputsPage >= Math.max(1, Math.ceil(inputsTotal / pageSize))}
+                    onClick={() => setInputsPage((p) => p + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === "processed" && (
+              <div className="card">
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Items/page{" "}
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </label>
+                  <label>
+                    Status{" "}
+                    <select value={processedStatusFilter} onChange={(e) => setProcessedStatusFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="pending">pending</option>
+                      <option value="processing">processing</option>
+                      <option value="cognified">cognified</option>
+                      <option value="completed">completed</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </label>
+                  <button onClick={loadProcessed}>Reload</button>
+                </div>
+                {processed.length === 0 ? <div className="empty">Không có processed datapoints với filter status: <code>{processedStatusFilter}</code>. Thử để <code>all</code>.</div> : null}
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
+                  </thead>
+                  <tbody>
+                    {processed.map((d) => (
+                      <tr key={d.id}>
+                        <td>{d.id}</td>
+                        <td>{d.parent_id || "-"}</td>
+                        <td>{Number.isInteger(d.chunk_index) ? `${d.chunk_index + 1}/${d.total_chunks || "?"}` : "-"}</td>
+                        <td>{d.status}</td>
+                        <td>{d.content?.slice(0, 120)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="pager">
+                  <button disabled={processedPage <= 1} onClick={() => setProcessedPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span className="muted">Page {processedPage} / {Math.max(1, Math.ceil(processedTotal / pageSize))} ({processedTotal} items)</span>
+                  <button
+                    disabled={processedPage >= Math.max(1, Math.ceil(processedTotal / pageSize))}
+                    onClick={() => setProcessedPage((p) => p + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === "overview" && overview && (
+              <div className="card">
+                <div className="row">
+                  <div className="metric"><strong>Total Records</strong><div>{overview.datapoint_count}</div></div>
+                  <div className="metric"><strong>Processed DataPoints</strong><div>{overview.type_summary?.chunk ?? 0}</div></div>
+                  <div className="metric"><strong>Sessions</strong><div>{overview.session_count}</div></div>
+                  <div className="metric"><strong>Vectors</strong><div>{overview.vector_count}</div></div>
+                </div>
+                <div className="row" style={{ marginTop: "10px" }}>
+                  <div className="metric"><strong>Input</strong><div>{overview.type_summary?.input ?? 0}</div></div>
+                  <div className="metric"><strong>Chunk</strong><div>{overview.type_summary?.chunk ?? 0}</div></div>
+                  <div className="metric"><strong>Pending</strong><div>{overview.status_summary?.pending ?? 0}</div></div>
+                  <div className="metric"><strong>Processing</strong><div>{overview.status_summary?.processing ?? 0}</div></div>
+                  <div className="metric"><strong>Completed</strong><div>{overview.status_summary?.completed ?? 0}</div></div>
+                </div>
+                <h3>Latest</h3>
+                <pre>{JSON.stringify(overview.latest, null, 2)}</pre>
+                {overview.datapoint_count === 0 && (
+                  <div className="empty">
+                    <strong>Database đang trống.</strong>
+                    <div style={{ marginTop: "8px" }}>
+                      Bạn cần nạp dữ liệu trước khi preview:
+                    </div>
+                    <div style={{ marginTop: "6px" }}>
+                      1) <code>ai-memory-cli add "Nội dung cần lưu"</code>
+                    </div>
+                    <div>
+                      2) <code>ai-memory-cli cognify --session default</code>
+                    </div>
+                    <div>
+                      3) Reload lại trang viewer.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === "datapoints" && (
+              <div className="card">
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Items/page{" "}
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </label>
+                  <label>
+                    Kind{" "}
+                    <select value={dpKindFilter} onChange={(e) => setDpKindFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="input">input</option>
+                      <option value="chunk">chunk</option>
+                      <option value="processed">processed</option>
+                    </select>
+                  </label>
+                  <label>
+                    Status{" "}
+                    <select value={dpStatusFilter} onChange={(e) => setDpStatusFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="pending">pending</option>
+                      <option value="processing">processing</option>
+                      <option value="cognified">cognified</option>
+                      <option value="completed">completed</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </label>
+                  <button onClick={loadDataPoints}>Reload</button>
+                </div>
+                {datapoints.length === 0 ? (
+                  <div className="empty">Chưa có processed datapoint nào. Hãy chạy <code>cognify</code> sau khi <code>add</code>.</div>
+                ) : null}
+                <table>
+                  <thead>
+                    <tr><th>ID</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
+                  </thead>
+                  <tbody>
+                    {datapoints.map((d) => (
+                      <tr key={d.id}>
+                        <td>
+                          <div><strong>{d.id}</strong></div>
+                          <div className="muted">kind: {d.item_type || "input"}</div>
+                          {d.parent_id ? <div className="muted">parent: {d.parent_id}</div> : null}
+                          {Number.isInteger(d.chunk_index) ? (
+                            <div className="muted">chunk: #{d.chunk_index + 1}/{d.total_chunks || "?"}</div>
+                          ) : null}
+                        </td>
+                        <td>{d.content?.slice(0, 120)}</td>
+                        <td>
+                          <div>{d.status}</div>
+                          {d.item_type === "input" && d.total_chunks ? (
+                            <div className="muted">progress: {d.processed_chunks || 0}/{d.total_chunks}</div>
+                          ) : null}
+                        </td>
+                        <td>{d.node_count}</td>
+                        <td>{d.edge_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="pager">
+                  <button disabled={dpPage <= 1} onClick={() => setDpPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span className="muted">Page {dpPage} / {Math.max(1, Math.ceil(datapointsTotal / pageSize))} ({datapointsTotal} items)</span>
+                  <button
+                    disabled={dpPage >= Math.max(1, Math.ceil(datapointsTotal / pageSize))}
+                    onClick={() => setDpPage((p) => p + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === "vectors" && (
+              <div className="card">
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Items/page{" "}
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
+                      <option value="10">10</option>
+                      <option value="20">20</option>
+                      <option value="50">50</option>
+                    </select>
+                  </label>
+                  <label>
+                    Kind{" "}
+                    <select value={vecKindFilter} onChange={(e) => setVecKindFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="input">input</option>
+                      <option value="chunk">chunk</option>
+                      <option value="processed">processed</option>
+                    </select>
+                  </label>
+                  <label>
+                    Status{" "}
+                    <select value={vecStatusFilter} onChange={(e) => setVecStatusFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="pending">pending</option>
+                      <option value="processing">processing</option>
+                      <option value="cognified">cognified</option>
+                      <option value="completed">completed</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </label>
+                  <button onClick={loadVectors}>Reload</button>
+                </div>
+                {vectors.length === 0 ? (
+                  <div className="empty">Chưa có vector embedding. Hãy chạy <code>cognify</code> sau khi <code>add</code>.</div>
+                ) : null}
+                <pre>{JSON.stringify(vectors, null, 2)}</pre>
+                <div className="pager">
+                  <button disabled={vectorsPage <= 1} onClick={() => setVectorsPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span className="muted">Page {vectorsPage} / {Math.max(1, Math.ceil(vectorsTotal / pageSize))} ({vectorsTotal} items)</span>
+                  <button
+                    disabled={vectorsPage >= Math.max(1, Math.ceil(vectorsTotal / pageSize))}
+                    onClick={() => setVectorsPage((p) => p + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tab === "relationships" && (
+              <div className="card">
+                <p><strong>Nodes:</strong> {relationships.nodes?.length || 0} | <strong>Edges:</strong> {relationships.edges?.length || 0}</p>
+                {(relationships.nodes?.length || 0) === 0 && (relationships.edges?.length || 0) === 0 ? (
+                  <div className="empty">Chưa có relationship graph. Hãy chạy <code>cognify</code> để trích xuất node/edge.</div>
+                ) : null}
+                {(relationships.nodes?.length || 0) > 0 && (
+                  <>
+                    <h4>Node List</h4>
+                    <table>
+                      <thead>
+                        <tr><th>ID</th><th>Type</th><th>Name</th></tr>
+                      </thead>
+                      <tbody>
+                        {(relationships.nodes || []).slice(0, 50).map((n) => (
+                          <tr key={n.id}>
+                            <td>{n.id}</td>
+                            <td>{n.type || "-"}</td>
+                            <td>{pickNodeLabel(n)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                {(relationships.edges?.length || 0) > 0 && (
+                  <>
+                    <h4 style={{ marginTop: "12px" }}>Edge List</h4>
+                    <table>
+                      <thead>
+                        <tr><th>ID</th><th>From</th><th>To</th><th>Type</th><th>Weight</th></tr>
+                      </thead>
+                      <tbody>
+                        {(relationships.edges || []).slice(0, 80).map((e, idx) => (
+                          <tr key={e.id || `${e.from}-${e.to}-${idx}`}>
+                            <td>{e.id || "-"}</td>
+                            <td>{e.from || "-"}</td>
+                            <td>{e.to || "-"}</td>
+                            <td>{e.type || "-"}</td>
+                            <td>{e.weight ?? "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                <h4 style={{ marginTop: "12px" }}>Raw Edges Preview</h4>
+                <pre>{JSON.stringify(topEdges, null, 2)}</pre>
+              </div>
+            )}
+
+            {tab === "graph" && (
+              <>
+                <div className="card">
+                  <p><strong>Graph stats</strong></p>
+                  <pre>{JSON.stringify(graphStats, null, 2)}</pre>
+                </div>
+                <div className="card">
+                  <p><strong>Relationship graph preview</strong> (zoom + drag)</p>
+                  <div ref={graphRef} className="graph-box"></div>
+                  <div className="info-grid" style={{ marginTop: "12px" }}>
+                    <div className="info-card">
+                      <strong>Render info</strong>
+                      <div className="muted">Node hiển thị: {graphRenderMeta.renderedNodes}</div>
+                      <div className="muted">Edge hiển thị: {graphRenderMeta.renderedEdges}</div>
+                      <div className="muted">Groups: {(graphRenderMeta.groups || []).join(", ") || "N/A"}</div>
+                    </div>
+                    <div className="info-card">
+                      <strong>Selected item</strong>
+                      {selectedGraphItem ? (
+                        <pre style={{ marginTop: "8px" }}>{JSON.stringify(selectedGraphItem, null, 2)}</pre>
+                      ) : (
+                        <div className="muted" style={{ marginTop: "8px" }}>
+                          Click vào node hoặc edge để xem chi tiết.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="row">
+                    <input value={graphNodeID} onChange={(e) => setGraphNodeID(e.target.value)} placeholder="node_id to inspect neighbors" />
+                    <button onClick={loadNeighbors}>Load neighbors</button>
+                  </div>
+                  <pre>{JSON.stringify(graphNeighbors, null, 2)}</pre>
+                </div>
+              </>
+            )}
+
+            {tab === "search" && (
+              <div className="card">
+                <div className="row">
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type query..." />
+                  <button onClick={runSearch}>Search</button>
+                </div>
+                <pre>{JSON.stringify(searchResult, null, 2)}</pre>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

@@ -114,6 +114,9 @@ type LLMExtractor interface {
 	// ExtractWithSchema extracts structured data using a Go struct schema
 	ExtractWithSchema(ctx context.Context, text string, schemaStruct interface{}) (interface{}, error)
 
+	// AnalyzeQuery analyzes a user query for pre-think search optimization
+	AnalyzeQuery(ctx context.Context, text string) (*schema.ThinkQueryAnalysis, error)
+
 	// SetProvider sets the LLM provider to use
 	SetProvider(provider LLMProvider)
 

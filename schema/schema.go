@@ -753,6 +753,8 @@ type SearchQuery struct {
 	Filters             map[string]interface{} `json:"filters"`
 	HopDepth            int                    `json:"hop_depth"` // Optional graph traversal depth
 	TimeRange           *TimeRange             `json:"time_range,omitempty"`
+	MaxContextLength    int                    `json:"max_context_length,omitempty"` // Maximum characters to include in ParsedContext
+	Analysis            *ThinkQueryAnalysis    `json:"analysis,omitempty"`           // Optional analysis for optimized retrieval
 }
 
 // SearchResults contains the results of a search operation
@@ -788,22 +790,40 @@ type ThinkQuery struct {
 	SessionID string                 `json:"session_id,omitempty"`
 	Limit     int                    `json:"limit"`
 	Filters   map[string]interface{} `json:"filters"`
-	
+
 	// Agentic Routing Options
 	HopDepth           int  // Number of neighbor hops to traverse from anchors
 	EnableThinking     bool // Toggle Agentic RAG / Iterative thinking loop
 	MaxThinkingSteps   int  // Maximum iterations the agent can request 'missing_entities'
-	LearnRelationships bool // Toggle automatic creation of 'BRIDGES_TO' relationships based on logic deduced during think 
+	LearnRelationships bool // Toggle automatic creation of 'BRIDGES_TO' relationships based on logic deduced during think
 	IncludeReasoning   bool // Returns standard JSON with Thought Process included
+
+	// Context Window Management
+	MaxContextLength int  // Maximum characters per segment
+	SegmentContext   bool // If true, process context in sequential segments
+
+	// Query Analysis (Pre-Think)
+	AnalyzeQuery bool                `json:"analyze_query"` // If true, perform LLM-based query analysis before retrieval
+	Analysis     *ThinkQueryAnalysis `json:"analysis,omitempty"`
+}
+
+// ThinkQueryAnalysis represents the LLM's pre-retrieval analysis of the query
+type ThinkQueryAnalysis struct {
+	QueryType      string   `json:"query_type"`      // Factual, Relational, Summarization, etc.
+	Subjects       []string `json:"subjects"`        // Key entities to look for in Graph
+	SearchKeywords []string `json:"search_keywords"` // Refined keywords for Vector search
+	ExpectedAnswer string   `json:"expected_answer"` // Brief description of what the answer should look like
+	Reasoning      string   `json:"reasoning"`       // LLM's logic for this analysis
 }
 
 // ThinkResult represents a single analytical step produced by the LLM
 type ThinkResult struct {
-	Intent          *RequestIntent `json:"intent,omitempty"`
-	Reasoning       string         `json:"reasoning,omitempty"`
-	MissingEntities []string       `json:"missing_entities,omitempty"`
-	Answer          string         `json:"answer,omitempty"`
-	ContextUsed     *SearchResults `json:"context_used,omitempty"`
+	Intent          *RequestIntent      `json:"intent,omitempty"`
+	Analysis        *ThinkQueryAnalysis `json:"analysis,omitempty"`
+	Reasoning       string              `json:"reasoning,omitempty"`
+	MissingEntities []string            `json:"missing_entities,omitempty"`
+	Answer          string              `json:"answer,omitempty"`
+	ContextUsed     *SearchResults      `json:"context_used,omitempty"`
 }
 
 // AgenticQueryResult is the final synthesized output containing reasoning flow

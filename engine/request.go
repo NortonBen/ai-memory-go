@@ -179,7 +179,7 @@ func (e *defaultMemoryEngine) processRelationships(ctx context.Context, sessionI
 		// Try to find if nodes already exist for these names in this session
 		fromID := e.findOrCreateEntityNode(ctx, sessionID, rel.From)
 		toID := e.findOrCreateEntityNode(ctx, sessionID, rel.To)
-		
+
 		// Create the relationship
 		edge := schema.NewEdge(fromID, toID, rel.Type, 1.0)
 		edge.SessionID = sessionID
@@ -191,7 +191,7 @@ func (e *defaultMemoryEngine) findOrCreateEntityNode(ctx context.Context, sessio
 	if name == "" {
 		return ""
 	}
-	
+
 	// SEARCH by name or entity in graph
 	// Try 'name' first
 	nodes, err := e.graphStore.FindNodesByProperty(ctx, "name", name)
@@ -208,21 +208,24 @@ func (e *defaultMemoryEngine) findOrCreateEntityNode(ctx context.Context, sessio
 			}
 		}
 	}
-	
+
 	// CREATE new node if not found
 	node := schema.NewNode(schema.NodeTypeEntity, map[string]interface{}{"name": name, "entity": name})
 	node.SessionID = sessionID
 	_ = e.graphStore.StoreNode(ctx, node)
-	
+
 	// Ensure the new node is immediately searchable via vector
 	if e.vectorStore != nil && e.embedder != nil {
-		dp := &schema.DataPoint{
-			ID:          node.ID,
-			Content:     name,
-			ContentType: string(schema.NodeTypeEntity),
-			SessionID:   sessionID,
+		embedding, err := e.embedder.GenerateEmbedding(ctx, name)
+		if err == nil && len(embedding) > 0 {
+			_ = e.vectorStore.StoreEmbedding(ctx, "entity-"+node.ID, embedding, map[string]interface{}{
+				"is_entity":   true,
+				"entity_id":   node.ID,
+				"entity_type": string(node.Type),
+				"source_id":   node.ID,
+				"session_id":  sessionID,
+			})
 		}
-		_, _ = e.Cognify(ctx, dp, WithWaitCognify(false))
 	}
 
 	return node.ID

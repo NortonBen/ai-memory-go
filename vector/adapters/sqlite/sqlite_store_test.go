@@ -81,3 +81,42 @@ func TestSQLiteVectorStore_BatchDeleteAndCount(t *testing.T) {
 	count, _ = s.GetEmbeddingCount(ctx)
 	assert.Equal(t, int64(0), count)
 }
+
+func TestSQLiteVectorStore_FilterDoesNotLoseValidHits(t *testing.T) {
+	s := tempVecStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.StoreBatchEmbeddings(ctx, []*vector.EmbeddingData{
+		{ID: "near-a1", Embedding: []float32{1, 0, 0}, Metadata: map[string]interface{}{"tag": "a"}},
+		{ID: "near-a2", Embedding: []float32{0.99, 0.01, 0}, Metadata: map[string]interface{}{"tag": "a"}},
+		{ID: "target-b", Embedding: []float32{0, 1, 0}, Metadata: map[string]interface{}{"tag": "b"}},
+	}))
+
+	results, err := s.SimilaritySearchWithFilter(ctx, []float32{1, 0, 0}, map[string]interface{}{"tag": "b"}, 1, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "target-b", results[0].ID)
+}
+
+func TestSQLiteVectorStore_RejectsWrongDimensions(t *testing.T) {
+	s := tempVecStore(t)
+	ctx := context.Background()
+
+	err := s.StoreEmbedding(ctx, "bad-dim", []float32{1, 0}, map[string]interface{}{})
+	require.Error(t, err)
+
+	_, err = s.SimilaritySearch(ctx, []float32{1, 0}, 5, 0)
+	require.Error(t, err)
+}
+
+func TestSQLiteVectorStore_UpsertUpdatesMetadata(t *testing.T) {
+	s := tempVecStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.StoreEmbedding(ctx, "m1", []float32{1, 0, 0}, map[string]interface{}{"version": "v1"}))
+	require.NoError(t, s.StoreEmbedding(ctx, "m1", []float32{0, 1, 0}, map[string]interface{}{"version": "v2"}))
+
+	_, meta, err := s.GetEmbedding(ctx, "m1")
+	require.NoError(t, err)
+	assert.Equal(t, "v2", meta["version"])
+}

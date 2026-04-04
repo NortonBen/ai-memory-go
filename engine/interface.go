@@ -12,6 +12,9 @@ type EngineConfig struct {
 	MaxWorkers               int           `json:"max_workers"`
 	EnableBackgroundAnalysis bool          `json:"enable_background_analysis"`
 	AnalysisInterval         time.Duration `json:"analysis_interval"`
+	// ChunkConcurrency is the max number of chunks processed in parallel inside a single CognifyTask.
+	// Defaults to 4 when unset or <= 0.
+	ChunkConcurrency int `json:"chunk_concurrency"`
 }
 
 // AddOptions holds optional parameters for the Add operation

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,8 +110,24 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 			nodes TEXT,
 			edges TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS input_datapoints (
+			id TEXT PRIMARY KEY,
+			content TEXT,
+			content_type TEXT,
+			metadata TEXT,
+			session_id TEXT,
+			user_id TEXT,
+			created_at DATETIME,
+			updated_at DATETIME,
+			processing_status TEXT,
+			error_message TEXT,
+			nodes TEXT,
+			edges TEXT
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_session_id ON datapoints(session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_datapoints_user_id ON datapoints(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_input_datapoints_session_id ON input_datapoints(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_input_datapoints_user_id ON input_datapoints(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_memory_sessions_user_id ON memory_sessions(user_id)`,
 	}
 
@@ -142,6 +159,8 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 	// Backwards compatibility for existing databases
 	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN nodes TEXT")
 	sa.db.ExecContext(ctx, "ALTER TABLE datapoints ADD COLUMN edges TEXT")
+	sa.db.ExecContext(ctx, "ALTER TABLE input_datapoints ADD COLUMN nodes TEXT")
+	sa.db.ExecContext(ctx, "ALTER TABLE input_datapoints ADD COLUMN edges TEXT")
 
 	// Table for session messages
 	sa.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS session_messages (
@@ -156,6 +175,25 @@ func (sa *SQLiteAdapter) setupTables(ctx context.Context) error {
 	return nil
 }
 
+func isInputDataPoint(dp *schema.DataPoint) bool {
+	if dp == nil || dp.Metadata == nil {
+		return false
+	}
+	raw, ok := dp.Metadata["is_input"]
+	if !ok {
+		return false
+	}
+	v, ok := raw.(bool)
+	return ok && v
+}
+
+func tableForDataPoint(dp *schema.DataPoint) string {
+	if isInputDataPoint(dp) {
+		return "input_datapoints"
+	}
+	return "datapoints"
+}
+
 // StoreDataPoint implements RelationalStore
 func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoint) error {
 	metadataBytes, err := json.Marshal(dp.Metadata)
@@ -166,8 +204,9 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 	nodesBytes, _ := json.Marshal(dp.Nodes)
 	edgesBytes, _ := json.Marshal(dp.Edges)
 
-	query := `
-		INSERT INTO datapoints (id, content, content_type, metadata, session_id, user_id, 
+	table := tableForDataPoint(dp)
+	query := fmt.Sprintf(`
+		INSERT INTO %s (id, content, content_type, metadata, session_id, user_id, 
 			created_at, updated_at, processing_status, error_message, nodes, edges)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
@@ -181,7 +220,7 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 			error_message = excluded.error_message,
 			nodes = excluded.nodes,
 			edges = excluded.edges
-	`
+	`, table)
 
 	_, err = sa.db.ExecContext(ctx, query,
 		dp.ID, dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
@@ -192,43 +231,42 @@ func (sa *SQLiteAdapter) StoreDataPoint(ctx context.Context, dp *schema.DataPoin
 
 // GetDataPoint implements RelationalStore
 func (sa *SQLiteAdapter) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) {
-	query := `
-		SELECT id, content, content_type, metadata, session_id, user_id,
-			created_at, updated_at, processing_status, error_message, nodes, edges
-		FROM datapoints WHERE id = ?
-	`
-	row := sa.db.QueryRowContext(ctx, query, id)
+	for _, table := range []string{"datapoints", "input_datapoints"} {
+		query := fmt.Sprintf(`
+			SELECT id, content, content_type, metadata, session_id, user_id,
+				created_at, updated_at, processing_status, error_message, nodes, edges
+			FROM %s WHERE id = ?
+		`, table)
+		row := sa.db.QueryRowContext(ctx, query, id)
 
-	var dp schema.DataPoint
-	var metadataStr, nodesStr, edgesStr sql.NullString
-
-	err := row.Scan(
-		&dp.ID, &dp.Content, &dp.ContentType, &metadataStr, &dp.SessionID, &dp.UserID,
-		&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("datapoint not found: %s", id)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if metadataStr.Valid && metadataStr.String != "" {
-		if err := json.Unmarshal([]byte(metadataStr.String), &dp.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		var dp schema.DataPoint
+		var metadataStr, nodesStr, edgesStr sql.NullString
+		err := row.Scan(
+			&dp.ID, &dp.Content, &dp.ContentType, &metadataStr, &dp.SessionID, &dp.UserID,
+			&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr)
+		if err == sql.ErrNoRows {
+			continue
 		}
-	} else {
-		dp.Metadata = make(map[string]interface{})
-	}
+		if err != nil {
+			return nil, err
+		}
 
-	if nodesStr.Valid && nodesStr.String != "" {
-		_ = json.Unmarshal([]byte(nodesStr.String), &dp.Nodes)
+		if metadataStr.Valid && metadataStr.String != "" {
+			if err := json.Unmarshal([]byte(metadataStr.String), &dp.Metadata); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		} else {
+			dp.Metadata = make(map[string]interface{})
+		}
+		if nodesStr.Valid && nodesStr.String != "" {
+			_ = json.Unmarshal([]byte(nodesStr.String), &dp.Nodes)
+		}
+		if edgesStr.Valid && edgesStr.String != "" {
+			_ = json.Unmarshal([]byte(edgesStr.String), &dp.Edges)
+		}
+		return &dp, nil
 	}
-	if edgesStr.Valid && edgesStr.String != "" {
-		_ = json.Unmarshal([]byte(edgesStr.String), &dp.Edges)
-	}
-
-	return &dp, nil
+	return nil, fmt.Errorf("datapoint not found: %s", id)
 }
 
 // UpdateDataPoint implements RelationalStore
@@ -241,55 +279,70 @@ func (sa *SQLiteAdapter) UpdateDataPoint(ctx context.Context, dp *schema.DataPoi
 	nodesBytes, _ := json.Marshal(dp.Nodes)
 	edgesBytes, _ := json.Marshal(dp.Edges)
 
-	query := `
-		UPDATE datapoints SET
-			content = ?, content_type = ?, metadata = ?, session_id = ?, user_id = ?,
-			updated_at = ?, processing_status = ?, error_message = ?, nodes = ?, edges = ?
-		WHERE id = ?
-	`
-	result, err := sa.db.ExecContext(ctx, query,
-		dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
-		time.Now(), dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes), dp.ID)
-
-	if err != nil {
-		return err
+	// Try preferred table first, then fallback to the other table.
+	preferred := tableForDataPoint(dp)
+	tables := []string{preferred}
+	if preferred == "datapoints" {
+		tables = append(tables, "input_datapoints")
+	} else {
+		tables = append(tables, "datapoints")
 	}
 
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("datapoint not found: %s", dp.ID)
+	for _, table := range tables {
+		query := fmt.Sprintf(`
+			UPDATE %s SET
+				content = ?, content_type = ?, metadata = ?, session_id = ?, user_id = ?,
+				updated_at = ?, processing_status = ?, error_message = ?, nodes = ?, edges = ?
+			WHERE id = ?
+		`, table)
+		result, err := sa.db.ExecContext(ctx, query,
+			dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
+			time.Now(), dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes), dp.ID)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows > 0 {
+			return nil
+		}
 	}
 
-	return nil
+	return fmt.Errorf("datapoint not found: %s", dp.ID)
 }
 
 // DeleteDataPoint implements RelationalStore
 func (sa *SQLiteAdapter) DeleteDataPoint(ctx context.Context, id string) error {
-	query := `DELETE FROM datapoints WHERE id = ?`
-	result, err := sa.db.ExecContext(ctx, query, id)
-	if err != nil {
-		return err
+	total := int64(0)
+	for _, table := range []string{"datapoints", "input_datapoints"} {
+		query := fmt.Sprintf("DELETE FROM %s WHERE id = ?", table)
+		result, err := sa.db.ExecContext(ctx, query, id)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		total += rows
 	}
-
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
+	if total == 0 {
 		return fmt.Errorf("datapoint not found: %s", id)
 	}
-
 	return nil
 }
 
 // DeleteDataPointsBySession implements RelationalStore
 func (sa *SQLiteAdapter) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
-	query := `DELETE FROM datapoints WHERE session_id = ?`
-	_, err := sa.db.ExecContext(ctx, query, sessionID)
-	return err
+	for _, table := range []string{"datapoints", "input_datapoints"} {
+		query := fmt.Sprintf("DELETE FROM %s WHERE session_id = ?", table)
+		if _, err := sa.db.ExecContext(ctx, query, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // QueryDataPoints implements RelationalStore
@@ -297,12 +350,61 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPoi
 	if q == nil {
 		q = storage.DefaultDataPointQuery()
 	}
+	primary, err := sa.queryDataPointsFromTable(ctx, q, "datapoints")
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := sa.queryDataPointsFromTable(ctx, q, "input_datapoints")
+	if err != nil {
+		return nil, err
+	}
+	results := append(primary, inputs...)
 
-	queryStr := `
+	sortBy := q.SortBy
+	if sortBy == "" {
+		sortBy = "created_at"
+	}
+	desc := strings.ToLower(q.SortOrder) != "asc"
+	sort.Slice(results, func(i, j int) bool {
+		switch sortBy {
+		case "updated_at":
+			if desc {
+				return results[i].UpdatedAt.After(results[j].UpdatedAt)
+			}
+			return results[i].UpdatedAt.Before(results[j].UpdatedAt)
+		case "id":
+			if desc {
+				return results[i].ID > results[j].ID
+			}
+			return results[i].ID < results[j].ID
+		default:
+			if desc {
+				return results[i].CreatedAt.After(results[j].CreatedAt)
+			}
+			return results[i].CreatedAt.Before(results[j].CreatedAt)
+		}
+	})
+
+	start := q.Offset
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(results) {
+		return []*schema.DataPoint{}, nil
+	}
+	end := len(results)
+	if q.Limit > 0 && start+q.Limit < end {
+		end = start + q.Limit
+	}
+	return results[start:end], nil
+}
+
+func (sa *SQLiteAdapter) queryDataPointsFromTable(ctx context.Context, q *storage.DataPointQuery, table string) ([]*schema.DataPoint, error) {
+	queryStr := fmt.Sprintf(`
 		SELECT id, content, content_type, metadata, session_id, user_id,
 			created_at, updated_at, processing_status, error_message, nodes, edges
-		FROM datapoints WHERE 1=1
-	`
+		FROM %s WHERE 1=1
+	`, table)
 	args := []interface{}{}
 
 	if q.SessionID != "" {
@@ -321,29 +423,6 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPoi
 		if q.SearchMode == "exact" {
 			queryStr += " AND content = ?"
 			args = append(args, q.SearchText)
-		} else if sa.config.EnableFullText && (q.SearchMode == "fulltext" || q.SearchMode == "") {
-			queryStr = `
-			SELECT d.id, d.content, d.content_type, d.metadata, d.session_id, d.user_id,
-				d.created_at, d.updated_at, d.processing_status, d.error_message, d.nodes, d.edges
-			FROM datapoints d
-			JOIN datapoints_fts fts ON d.rowid = fts.rowid
-			WHERE fts.content MATCH ?
-			`
-			args = []interface{}{q.SearchText} // Reset args, replace WHERE clause logic below if mixed
-			
-			// Re-apply other filters
-			if q.SessionID != "" {
-				queryStr += " AND d.session_id = ?"
-				args = append(args, q.SessionID)
-			}
-			if q.UserID != "" {
-				queryStr += " AND d.user_id = ?"
-				args = append(args, q.UserID)
-			}
-			if q.ContentType != "" {
-				queryStr += " AND d.content_type = ?"
-				args = append(args, q.ContentType)
-			}
 		} else {
 			queryStr += " AND content LIKE ?"
 			args = append(args, "%"+q.SearchText+"%")
@@ -352,43 +431,6 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPoi
 	if q.CreatedAfter != nil {
 		queryStr += " AND created_at > ?"
 		args = append(args, *q.CreatedAfter)
-	}
-
-	if q.SortBy != "" {
-		order := "ASC"
-		if strings.ToLower(q.SortOrder) == "desc" {
-			order = "DESC"
-		}
-		// Basic prevention against sql injection for order by
-		validSortCol := map[string]bool{"created_at": true, "updated_at": true, "id": true}
-		if validSortCol[q.SortBy] {
-			if sa.config.EnableFullText && q.SearchText != "" && (q.SearchMode == "fulltext" || q.SearchMode == "") {
-				queryStr += fmt.Sprintf(" ORDER BY d.%s %s", q.SortBy, order)
-			} else {
-				queryStr += fmt.Sprintf(" ORDER BY %s %s", q.SortBy, order)
-			}
-		} else {
-			if sa.config.EnableFullText && q.SearchText != "" && (q.SearchMode == "fulltext" || q.SearchMode == "") {
-				queryStr += fmt.Sprintf(" ORDER BY d.created_at %s", order)
-			} else {
-				queryStr += fmt.Sprintf(" ORDER BY created_at %s", order)
-			}
-		}
-	} else {
-		if sa.config.EnableFullText && q.SearchText != "" && (q.SearchMode == "fulltext" || q.SearchMode == "") {
-			queryStr += " ORDER BY d.created_at DESC"
-		} else {
-			queryStr += " ORDER BY created_at DESC"
-		}
-	}
-
-	if q.Limit > 0 {
-		queryStr += " LIMIT ?"
-		args = append(args, q.Limit)
-	}
-	if q.Offset > 0 {
-		queryStr += " OFFSET ?"
-		args = append(args, q.Offset)
 	}
 
 	rows, err := sa.db.QueryContext(ctx, queryStr, args...)
@@ -401,10 +443,10 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPoi
 	for rows.Next() {
 		dp := &schema.DataPoint{}
 		var metadataStr, nodesStr, edgesStr sql.NullString
-		err := rows.Scan(
+		if err := rows.Scan(
 			&dp.ID, &dp.Content, &dp.ContentType, &metadataStr, &dp.SessionID, &dp.UserID,
-			&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr)
-		if err != nil {
+			&dp.CreatedAt, &dp.UpdatedAt, &dp.ProcessingStatus, &dp.ErrorMessage, &nodesStr, &edgesStr,
+		); err != nil {
 			return nil, err
 		}
 		if metadataStr.Valid && metadataStr.String != "" {
@@ -422,7 +464,6 @@ func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPoi
 		}
 		results = append(results, dp)
 	}
-
 	return results, nil
 }
 
@@ -614,54 +655,12 @@ func (sa *SQLiteAdapter) GetSessionMessages(ctx context.Context, sessionID strin
 
 // StoreBatch implements RelationalStore
 func (sa *SQLiteAdapter) StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error {
-	tx, err := sa.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
-
-	query := `
-		INSERT INTO datapoints (id, content, content_type, metadata, session_id, user_id, 
-			created_at, updated_at, processing_status, error_message, nodes, edges)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET
-			content = excluded.content,
-			content_type = excluded.content_type,
-			metadata = excluded.metadata,
-			session_id = excluded.session_id,
-			user_id = excluded.user_id,
-			updated_at = excluded.updated_at,
-			processing_status = excluded.processing_status,
-			error_message = excluded.error_message,
-			nodes = excluded.nodes,
-			edges = excluded.edges
-	`
-	stmt, err := tx.PrepareContext(ctx, query)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
 	for _, dp := range dataPoints {
-		metadataBytes, err := json.Marshal(dp.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to marshal metadata for dp %s: %w", dp.ID, err)
-		}
-		nodesBytes, _ := json.Marshal(dp.Nodes)
-		edgesBytes, _ := json.Marshal(dp.Edges)
-		_, err = stmt.ExecContext(ctx,
-			dp.ID, dp.Content, dp.ContentType, string(metadataBytes), dp.SessionID, dp.UserID,
-			dp.CreatedAt, dp.UpdatedAt, dp.ProcessingStatus, dp.ErrorMessage, string(nodesBytes), string(edgesBytes))
-		if err != nil {
+		if err := sa.StoreDataPoint(ctx, dp); err != nil {
 			return err
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 // DeleteBatch implements RelationalStore
@@ -688,8 +687,11 @@ func (sa *SQLiteAdapter) DeleteBatch(ctx context.Context, ids []string) error {
 		}
 		
 		query := fmt.Sprintf("DELETE FROM datapoints WHERE id IN (%s)", strings.Join(placeholders, ","))
-		_, err := sa.db.ExecContext(ctx, query, args...)
-		if err != nil {
+		if _, err := sa.db.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+		queryInput := fmt.Sprintf("DELETE FROM input_datapoints WHERE id IN (%s)", strings.Join(placeholders, ","))
+		if _, err := sa.db.ExecContext(ctx, queryInput, args...); err != nil {
 			return err
 		}
 	}
@@ -699,9 +701,14 @@ func (sa *SQLiteAdapter) DeleteBatch(ctx context.Context, ids []string) error {
 
 // GetDataPointCount implements RelationalStore
 func (sa *SQLiteAdapter) GetDataPointCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := sa.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM datapoints`).Scan(&count)
-	return count, err
+	var countA, countB int64
+	if err := sa.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM datapoints`).Scan(&countA); err != nil {
+		return 0, err
+	}
+	if err := sa.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM input_datapoints`).Scan(&countB); err != nil {
+		return 0, err
+	}
+	return countA + countB, nil
 }
 
 // GetSessionCount implements RelationalStore

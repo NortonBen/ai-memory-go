@@ -18,15 +18,16 @@ type WorkerTask interface {
 
 // WorkerPool manages a pool of workers to process MemoryEngine tasks concurrently.
 type WorkerPool struct {
-	maxWorkers  int
-	taskQueue   chan WorkerTask
-	extractor   extractor.LLMExtractor
-	embedder    vector.EmbeddingProvider
-	store       storage.Storage
-	graphStore  graph.GraphStore
-	vectorStore vector.VectorStore
-	wg          sync.WaitGroup
-	quit        chan struct{}
+	maxWorkers       int
+	taskQueue        chan WorkerTask
+	extractor        extractor.LLMExtractor
+	embedder         vector.EmbeddingProvider
+	store            storage.Storage
+	graphStore       graph.GraphStore
+	vectorStore      vector.VectorStore
+	wg               sync.WaitGroup
+	quit             chan struct{}
+	ChunkConcurrency int
 }
 
 // NewWorkerPool initializes the WorkerPool.

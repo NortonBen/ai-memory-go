@@ -17,6 +17,9 @@ var (
 	thinkMaxSteps    int
 	thinkIncludeRsn  bool
 	thinkLearnRels   bool
+	thinkMaxCtxChars int
+	thinkSegment     bool
+	thinkAnalyze     bool
 )
 
 var thinkCmd = &cobra.Command{
@@ -44,6 +47,9 @@ var thinkCmd = &cobra.Command{
 			MaxThinkingSteps:   thinkMaxSteps,
 			IncludeReasoning:   thinkIncludeRsn,
 			LearnRelationships: thinkLearnRels,
+			MaxContextLength:   thinkMaxCtxChars,
+			SegmentContext:     thinkSegment,
+			AnalyzeQuery:       thinkAnalyze,
 		}
 
 		resp, err := eng.Think(ctx, query)
@@ -85,4 +91,7 @@ func init() {
 	thinkCmd.Flags().IntVarP(&thinkMaxSteps, "steps", "t", 3, "maximum number of thinking hops in the graph")
 	thinkCmd.Flags().BoolVarP(&thinkIncludeRsn, "reasoning", "r", true, "output reasoning trace")
 	thinkCmd.Flags().BoolVar(&thinkLearnRels, "learn", true, "learn new bridging relationships automatically")
+	thinkCmd.Flags().IntVar(&thinkMaxCtxChars, "max-context-chars", 4000, "maximum characters per context segment")
+	thinkCmd.Flags().BoolVar(&thinkSegment, "segment", true, "process large context in sequential segments")
+	thinkCmd.Flags().BoolVarP(&thinkAnalyze, "analyze", "a", false, "perform LLM-based query analysis before retrieval")
 }

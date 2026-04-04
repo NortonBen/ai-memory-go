@@ -42,7 +42,7 @@ func TestParserInterface_ParseText(t *testing.T) {
 			name:     "Large paragraph text for chunking",
 			content:  strings.Repeat("This is a paragraph with enough content to trigger chunking. ", 20) + "\n\n" + strings.Repeat("This is another paragraph with enough content. ", 20) + "\n\n" + strings.Repeat("This is the third paragraph with sufficient content. ", 20),
 			strategy: schema.StrategyParagraph,
-			expected: 3, // Should create multiple chunks due to size
+			expected: 5, // Oversized paragraphs are now split to respect MaxSize
 		},
 		{
 			name:     "Fixed size chunking",

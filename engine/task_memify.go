@@ -129,6 +129,18 @@ func (t *MemifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, em
 		return t.fail(ctx, store, fmt.Errorf("failed to update DataPoint: %w", err))
 	}
 
+	// If this is a chunk DataPoint, synchronize parent input DataPoint status.
+	if t.DataPoint.Metadata != nil {
+		if parentID, ok := t.DataPoint.Metadata["parent_id"].(string); ok && parentID != "" {
+			parent, err := store.GetDataPoint(ctx, parentID)
+			if err == nil && parent != nil {
+				if err := syncParentStatusFromChildren(ctx, store, parent); err != nil {
+					log.Printf("failed to sync parent completion for %s: %v", parentID, err)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

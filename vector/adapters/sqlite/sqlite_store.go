@@ -33,6 +33,12 @@ type SQLiteVectorStore struct {
 	dimension int
 }
 
+type knnRow struct {
+	id       string
+	metadata map[string]interface{}
+	distance float64
+}
+
 // NewSQLiteVectorStore opens (or creates) a SQLite+sqlite-vec database at path.
 // dimension is the size of the embedding vectors.
 func NewSQLiteVectorStore(config *vector.VectorConfig) (*SQLiteVectorStore, error) {
@@ -93,12 +99,18 @@ func (s *SQLiteVectorStore) Close() error { return s.db.Close() }
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 func (s *SQLiteVectorStore) StoreEmbedding(ctx context.Context, id string, embedding []float32, metadata map[string]interface{}) error {
-	metaJSON, _ := json.Marshal(metadata)
+	if err := s.validateVectorDim(embedding); err != nil {
+		return err
+	}
+	metaJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
 	now := time.Now()
 
 	// Check if id already exists
 	var existingRowid int64
-	err := s.db.QueryRowContext(ctx, `SELECT rowid FROM vec_meta WHERE id=?`, id).Scan(&existingRowid)
+	err = s.db.QueryRowContext(ctx, `SELECT rowid FROM vec_meta WHERE id=?`, id).Scan(&existingRowid)
 
 	tx, txErr := s.db.BeginTx(ctx, nil)
 	if txErr != nil {
@@ -125,8 +137,10 @@ func (s *SQLiteVectorStore) StoreEmbedding(ctx context.Context, id string, embed
 			`UPDATE vec_items SET embedding=? WHERE rowid=?`, f32ToBlob(embedding), existingRowid); err != nil {
 			return fmt.Errorf("vec_items update: %w", err)
 		}
-		tx.ExecContext(ctx,
-			`UPDATE vec_meta SET metadata=?, updated_at=? WHERE id=?`, string(metaJSON), now, id)
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE vec_meta SET metadata=?, updated_at=? WHERE id=?`, string(metaJSON), now, id); err != nil {
+			return fmt.Errorf("vec_meta update: %w", err)
+		}
 	}
 	return tx.Commit()
 }
@@ -147,6 +161,9 @@ func (s *SQLiteVectorStore) GetEmbedding(ctx context.Context, id string) ([]floa
 }
 
 func (s *SQLiteVectorStore) UpdateEmbedding(ctx context.Context, id string, embedding []float32) error {
+	if err := s.validateVectorDim(embedding); err != nil {
+		return err
+	}
 	var rowid int64
 	if err := s.db.QueryRowContext(ctx, `SELECT rowid FROM vec_meta WHERE id=?`, id).Scan(&rowid); err != nil {
 		return fmt.Errorf("embedding not found: %s", id)
@@ -195,50 +212,66 @@ func (s *SQLiteVectorStore) SimilaritySearch(ctx context.Context, queryEmbedding
 }
 
 func (s *SQLiteVectorStore) SimilaritySearchWithFilter(ctx context.Context, queryEmbedding []float32, filters map[string]interface{}, limit int, threshold float64) ([]*vector.SimilarityResult, error) {
+	if err := s.validateVectorDim(queryEmbedding); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 10
 	}
-	// sqlite-vec KNN: ORDER BY distance with k parameter
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.metadata, v.distance
-		FROM vec_items v
-		JOIN vec_meta m ON m.rowid = v.rowid
-		WHERE v.embedding MATCH ? AND k = ?
-		ORDER BY v.distance`,
-		f32ToBlob(queryEmbedding), limit)
-	if err != nil {
-		return nil, fmt.Errorf("knn search: %w", err)
+	// When filters are applied, fetch a wider KNN window to avoid filtering away
+	// near candidates and missing valid matches deeper in the ranking.
+	candidateLimit := limit
+	if len(filters) > 0 {
+		candidateLimit = max(limit*4, limit+10)
 	}
-	defer rows.Close()
+	maxCandidateLimit := 5000
 
-	var results []*vector.SimilarityResult
-	for rows.Next() {
-		var id, metaJSON string
-		var distance float64
-		if err := rows.Scan(&id, &metaJSON, &distance); err != nil {
+	var candidates []knnRow
+	for {
+		rows, err := s.knnSearch(ctx, queryEmbedding, candidateLimit)
+		if err != nil {
 			return nil, err
 		}
-		score := 1.0 / (1.0 + distance)
+		candidates = rows
 
-		// DEBUG PRINT
-		fmt.Printf(" [DEBUG Vector DB] ID: %s, Distance: %f, Score: %f\n", id, distance, score)
+		if len(filters) == 0 {
+			break
+		}
+		matched := 0
+		for _, r := range candidates {
+			if vecMatchesFilters(r.metadata, filters) {
+				score := 1.0 / (1.0 + r.distance)
+				if score >= threshold {
+					matched++
+				}
+			}
+		}
+		if matched >= limit || len(candidates) < candidateLimit || candidateLimit >= maxCandidateLimit {
+			break
+		}
+		candidateLimit = min(candidateLimit*2, maxCandidateLimit)
+	}
 
+	var results []*vector.SimilarityResult
+	for _, r := range candidates {
+		score := 1.0 / (1.0 + r.distance)
 		if score < threshold {
 			continue
 		}
-		var meta map[string]interface{}
-		json.Unmarshal([]byte(metaJSON), &meta)
-		if !vecMatchesFilters(meta, filters) {
+		if !vecMatchesFilters(r.metadata, filters) {
 			continue
 		}
 		results = append(results, &vector.SimilarityResult{
-			ID:       id,
+			ID:       r.id,
 			Score:    score,
-			Metadata: meta,
-			Distance: distance,
+			Metadata: r.metadata,
+			Distance: r.distance,
 		})
+		if len(results) >= limit {
+			break
+		}
 	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // ─── Collection Management (SQLite = single-table, lightweight) ───────────────
@@ -305,4 +338,45 @@ func vecMatchesFilters(metadata map[string]interface{}, filters map[string]inter
 		}
 	}
 	return true
+}
+
+func (s *SQLiteVectorStore) validateVectorDim(v []float32) error {
+	if len(v) != s.dimension {
+		return fmt.Errorf("invalid embedding dimension: expected %d, got %d", s.dimension, len(v))
+	}
+	return nil
+}
+
+func (s *SQLiteVectorStore) knnSearch(ctx context.Context, queryEmbedding []float32, limit int) ([]knnRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.id, m.metadata, v.distance
+		FROM vec_items v
+		JOIN vec_meta m ON m.rowid = v.rowid
+		WHERE v.embedding MATCH ? AND k = ?
+		ORDER BY v.distance`,
+		f32ToBlob(queryEmbedding), limit)
+	if err != nil {
+		return nil, fmt.Errorf("knn search: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]knnRow, 0, limit)
+	for rows.Next() {
+		var id, metaJSON string
+		var distance float64
+		if err := rows.Scan(&id, &metaJSON, &distance); err != nil {
+			return nil, err
+		}
+		var meta map[string]interface{}
+		_ = json.Unmarshal([]byte(metaJSON), &meta)
+		if meta == nil {
+			meta = make(map[string]interface{})
+		}
+		out = append(out, knnRow{
+			id:       id,
+			metadata: meta,
+			distance: distance,
+		})
+	}
+	return out, rows.Err()
 }

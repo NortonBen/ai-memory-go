@@ -29,8 +29,12 @@ func NewMemoryEngine(ext extractor.LLMExtractor, emb vector.EmbeddingProvider, s
 	if cfg.MaxWorkers <= 0 {
 		cfg.MaxWorkers = 5
 	}
+	if cfg.ChunkConcurrency <= 0 {
+		cfg.ChunkConcurrency = 4
+	}
 
 	pool := NewWorkerPool(cfg.MaxWorkers, ext, emb, store, nil, nil)
+	pool.ChunkConcurrency = cfg.ChunkConcurrency
 	pool.Start()
 
 	return &defaultMemoryEngine{
@@ -46,8 +50,12 @@ func NewMemoryEngineWithStores(ext extractor.LLMExtractor, emb vector.EmbeddingP
 	if cfg.MaxWorkers <= 0 {
 		cfg.MaxWorkers = 5
 	}
+	if cfg.ChunkConcurrency <= 0 {
+		cfg.ChunkConcurrency = 4
+	}
 
 	pool := NewWorkerPool(cfg.MaxWorkers, ext, emb, store, graphStore, vectorStore)
+	pool.ChunkConcurrency = cfg.ChunkConcurrency
 	pool.Start()
 
 	engine := &defaultMemoryEngine{
@@ -112,7 +120,15 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		Limit:      1,
 	}
 	if existingMatches, err := e.store.QueryDataPoints(ctx, searchQuery); err == nil && len(existingMatches) > 0 {
-		return existingMatches[0], nil
+		// Only dedupe against INPUT records.
+		// Do not dedupe against chunk/processed datapoints.
+		for _, existing := range existingMatches {
+			if existing != nil && existing.Metadata != nil {
+				if isInput, ok := existing.Metadata["is_input"].(bool); ok && isInput {
+					return existing, nil
+				}
+			}
+		}
 	}
 
 	dp := &schema.DataPoint{
@@ -125,6 +141,12 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		ProcessingStatus: schema.StatusPending,
 		Metadata:         options.Metadata,
 	}
+	// Mark the original user input as an input record.
+	if dp.Metadata == nil {
+		dp.Metadata = make(map[string]interface{})
+	}
+	dp.Metadata["is_input"] = true
+	dp.Metadata["is_chunk"] = false
 
 	// Persist the initial pending DataPoint
 	err := e.store.StoreDataPoint(ctx, dp)
@@ -165,24 +187,53 @@ func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.Dat
 	return dataPoint, nil
 }
 
-// CognifyPending sweeps the relational store for items that have ProcessingStatus == StatusPending and processes them synchronously.
+// CognifyPending keeps sweeping the relational store and processes all pending/processing items
+// until no more work remains for the session.
 func (e *defaultMemoryEngine) CognifyPending(ctx context.Context, sessionID string) error {
-	q := &storage.DataPointQuery{
-		SessionID: sessionID,
-		Limit:     1000,
-	}
-	dps, err := e.store.QueryDataPoints(ctx, q)
-	if err != nil {
-		return fmt.Errorf("failed to query data points: %w", err)
-	}
+	for {
+		q := &storage.DataPointQuery{
+			SessionID: sessionID,
+			Limit:     1000,
+		}
+		dps, err := e.store.QueryDataPoints(ctx, q)
+		if err != nil {
+			return fmt.Errorf("failed to query data points: %w", err)
+		}
 
-	for _, dp := range dps {
-		if dp.ProcessingStatus == schema.StatusPending {
-			fmt.Printf("Cognifying pending data point: %s (Content: %.30s...)\n", dp.ID, dp.Content)
+		var workload []*schema.DataPoint
+		for _, dp := range dps {
+			if dp.ProcessingStatus == schema.StatusPending || dp.ProcessingStatus == schema.StatusProcessing {
+				workload = append(workload, dp)
+			}
+		}
+
+		if len(workload) == 0 {
+			break
+		}
+
+		progress := false
+		for _, dp := range workload {
+			// Re-process stale "processing" items by resetting to pending.
+			if dp.ProcessingStatus == schema.StatusProcessing {
+				dp.ProcessingStatus = schema.StatusPending
+				dp.UpdatedAt = time.Now()
+				if err := e.store.UpdateDataPoint(ctx, dp); err != nil {
+					fmt.Printf("Failed to reset processing data point %s: %v\n", dp.ID, err)
+					continue
+				}
+			}
+
+			fmt.Printf("Cognifying data point: %s (status=%s, content=%.30s...)\n", dp.ID, dp.ProcessingStatus, dp.Content)
 			_, err := e.Cognify(ctx, dp, WithWaitCognify(true))
 			if err != nil {
 				fmt.Printf("Failed to cognify data point %s: %v\n", dp.ID, err)
+				continue
 			}
+			progress = true
+		}
+
+		if !progress {
+			break
 		}
 	}
 	return nil

@@ -21,6 +21,22 @@ func NewTextParser(config *schema.ChunkingConfig) *TextParser {
 	if config == nil {
 		config = schema.DefaultChunkingConfig()
 	}
+	if config.MaxSize <= 0 {
+		config.MaxSize = schema.DefaultChunkingConfig().MaxSize
+	}
+	if config.MinSize < 0 {
+		config.MinSize = 0
+	}
+	if config.Overlap < 0 {
+		config.Overlap = 0
+	}
+	// Guard against invalid window that can cause non-progressing loops.
+	if config.Overlap >= config.MaxSize {
+		config.Overlap = config.MaxSize - 1
+		if config.Overlap < 0 {
+			config.Overlap = 0
+		}
+	}
 	return &TextParser{config: config}
 }
 
@@ -91,6 +107,17 @@ func (tp *TextParser) chunkByParagraph(content, source string) ([]*schema.Chunk,
 			continue
 		}
 
+		// If a single paragraph is larger than MaxSize, split it safely.
+		if len([]rune(para)) > tp.config.MaxSize {
+			if currentChunk != "" && len(currentChunk) >= tp.config.MinSize {
+				chunk := schema.NewChunk(currentChunk, source, schema.ChunkTypeParagraph)
+				chunks = append(chunks, chunk)
+				currentChunk = ""
+			}
+			chunks = append(chunks, tp.splitLargeUnit(para, source, schema.ChunkTypeParagraph)...)
+			continue
+		}
+
 		// If adding this paragraph exceeds max size, save current chunk
 		if len(currentChunk)+len(para)+2 > tp.config.MaxSize && currentChunk != "" {
 			// Only create chunk if it meets minimum size
@@ -101,7 +128,12 @@ func (tp *TextParser) chunkByParagraph(content, source string) ([]*schema.Chunk,
 
 			// Start new chunk with overlap
 			if tp.config.Overlap > 0 && len(currentChunk) > tp.config.Overlap {
-				currentChunk = getLastNChars(currentChunk, tp.config.Overlap) + "\n\n" + para
+				candidate := getLastNChars(currentChunk, tp.config.Overlap) + "\n\n" + para
+				if len(candidate) <= tp.config.MaxSize {
+					currentChunk = candidate
+				} else {
+					currentChunk = para
+				}
 			} else {
 				currentChunk = para
 			}
@@ -131,12 +163,11 @@ func (tp *TextParser) chunkByParagraph(content, source string) ([]*schema.Chunk,
 
 // chunkBySentence splits text into sentence-based chunks
 func (tp *TextParser) chunkBySentence(content, source string) ([]*schema.Chunk, error) {
-	// Simple sentence splitting (can be improved with NLP)
-	sentenceRegex := regexp.MustCompile(`[.!?]+[\s\n]*`)
-	sentences := sentenceRegex.Split(content, -1)
+	sentences := splitIntoSentences(content)
 
 	chunks := make([]*schema.Chunk, 0)
 	currentChunk := ""
+	var currentSentences []string
 
 	for _, sentence := range sentences {
 		sentence = strings.TrimSpace(sentence)
@@ -144,26 +175,51 @@ func (tp *TextParser) chunkBySentence(content, source string) ([]*schema.Chunk, 
 			continue
 		}
 
+		// If a single sentence is larger than MaxSize, split it safely.
+		if len([]rune(sentence)) > tp.config.MaxSize {
+			if currentChunk != "" && len(currentChunk) >= tp.config.MinSize {
+				chunk := schema.NewChunk(currentChunk, source, schema.ChunkTypeSentence)
+				chunks = append(chunks, chunk)
+			}
+			chunks = append(chunks, tp.splitLargeUnit(sentence, source, schema.ChunkTypeSentence)...)
+			currentChunk = ""
+			currentSentences = nil
+			continue
+		}
+
 		// If adding this sentence exceeds max size, save current chunk
-		if len(currentChunk)+len(sentence)+2 > tp.config.MaxSize && currentChunk != "" {
-			// Only create chunk if it meets minimum size
+		if len(currentChunk)+len(sentence)+1 > tp.config.MaxSize && currentChunk != "" {
 			if len(currentChunk) >= tp.config.MinSize {
 				chunk := schema.NewChunk(currentChunk, source, schema.ChunkTypeSentence)
 				chunks = append(chunks, chunk)
 			}
 
-			// Start new chunk with overlap
-			if tp.config.Overlap > 0 && len(currentChunk) > tp.config.Overlap {
-				currentChunk = getLastNChars(currentChunk, tp.config.Overlap) + ". " + sentence
+			// Get overlap sentences
+			overlapText := ""
+			if tp.config.Overlap > 0 {
+				overlapText = tp.getOverlapSentences(currentSentences)
+			}
+
+			if overlapText != "" {
+				candidate := overlapText + " " + sentence
+				if len(candidate) <= tp.config.MaxSize {
+					currentChunk = candidate
+				} else {
+					currentChunk = sentence
+				}
+				// Reset currentSentences with overlap sentences + current sentence
+				currentSentences = append(splitIntoSentences(overlapText), sentence)
 			} else {
 				currentChunk = sentence
+				currentSentences = []string{sentence}
 			}
 		} else {
 			if currentChunk != "" {
-				currentChunk += ". " + sentence
+				currentChunk += " " + sentence
 			} else {
 				currentChunk = sentence
 			}
+			currentSentences = append(currentSentences, sentence)
 		}
 	}
 
@@ -182,12 +238,41 @@ func (tp *TextParser) chunkBySentence(content, source string) ([]*schema.Chunk, 
 	return chunks, nil
 }
 
+// getOverlapSentences gets as many sentences as possible from the end of a sentence list within overlap limit.
+// It ensures at least one sentence is returned if Overlap > 0 and sentences are available.
+func (tp *TextParser) getOverlapSentences(sentences []string) string {
+	if len(sentences) == 0 || tp.config.Overlap <= 0 {
+		return ""
+	}
+
+	var overlapSentences []string
+	currentLen := 0
+
+	// Go backwards from the end
+	for i := len(sentences) - 1; i >= 0; i-- {
+		sent := sentences[i]
+		// If this is the first sentence we're adding (the very last one in the list),
+		// we add it anyway to ensure at least one connecting sentence exists.
+		if len(overlapSentences) > 0 && currentLen+len(sent)+1 > tp.config.Overlap {
+			break
+		}
+		overlapSentences = append([]string{sent}, overlapSentences...)
+		currentLen += len(sent) + 1
+	}
+
+	return strings.Join(overlapSentences, " ")
+}
+
 // chunkByFixedSize splits text into fixed-size chunks with overlap
 func (tp *TextParser) chunkByFixedSize(content, source string) ([]*schema.Chunk, error) {
 	chunks := make([]*schema.Chunk, 0)
 	contentRunes := []rune(content)
+	step := tp.config.MaxSize - tp.config.Overlap
+	if step <= 0 {
+		step = tp.config.MaxSize
+	}
 
-	for i := 0; i < len(contentRunes); i += tp.config.MaxSize - tp.config.Overlap {
+	for i := 0; i < len(contentRunes); i += step {
 		end := i + tp.config.MaxSize
 		if end > len(contentRunes) {
 			end = len(contentRunes)
@@ -210,6 +295,35 @@ func (tp *TextParser) chunkByFixedSize(content, source string) ([]*schema.Chunk,
 	return chunks, nil
 }
 
+// splitLargeUnit splits a single oversized paragraph/sentence into fixed windows with overlap.
+func (tp *TextParser) splitLargeUnit(unit, source string, chunkType schema.ChunkType) []*schema.Chunk {
+	var out []*schema.Chunk
+	runes := []rune(strings.TrimSpace(unit))
+	if len(runes) == 0 {
+		return out
+	}
+
+	step := tp.config.MaxSize - tp.config.Overlap
+	if step <= 0 {
+		step = tp.config.MaxSize
+	}
+
+	for i := 0; i < len(runes); i += step {
+		end := i + tp.config.MaxSize
+		if end > len(runes) {
+			end = len(runes)
+		}
+		part := strings.TrimSpace(string(runes[i:end]))
+		if part != "" {
+			out = append(out, schema.NewChunk(part, source, chunkType))
+		}
+		if end >= len(runes) {
+			break
+		}
+	}
+	return out
+}
+
 // chunkBySemantic splits text using semantic boundaries (simplified version)
 func (tp *TextParser) chunkBySemantic(content, source string) ([]*schema.Chunk, error) {
 	// For now, use paragraph-based chunking as a baseline
@@ -224,6 +338,30 @@ func getLastNChars(s string, n int) string {
 		return s
 	}
 	return string(runes[len(runes)-n:])
+}
+
+// splitIntoSentences splits text into sentences preserving punctuation
+func splitIntoSentences(text string) []string {
+	re := regexp.MustCompile(`[.!?]+[\s\n]*`)
+	matches := re.FindAllStringIndex(text, -1)
+
+	sentences := make([]string, 0)
+	lastIndex := 0
+	for _, match := range matches {
+		sent := strings.TrimSpace(text[lastIndex:match[1]])
+		if sent != "" {
+			sentences = append(sentences, sent)
+		}
+		lastIndex = match[1]
+	}
+
+	if lastIndex < len(text) {
+		last := strings.TrimSpace(text[lastIndex:])
+		if last != "" {
+			sentences = append(sentences, last)
+		}
+	}
+	return sentences
 }
 
 // SplitIntoWords splits text into words for keyword extraction

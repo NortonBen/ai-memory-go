@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/fatih/color"
@@ -48,7 +49,19 @@ var addCmd = &cobra.Command{
 			body, _ := io.ReadAll(resp.Body)
 			content = string(body)
 		} else if len(args) > 0 {
-			content = args[0]
+			// Convenience: if first arg looks like an existing file path, ingest file content.
+			// This avoids accidental storing of literal file path string.
+			candidate := strings.TrimSpace(args[0])
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				data, readErr := os.ReadFile(candidate)
+				if readErr != nil {
+					color.Red("Error reading file argument %q: %v", candidate, readErr)
+					return
+				}
+				content = string(data)
+			} else {
+				content = args[0]
+			}
 		} else {
 			color.Red("Please provide content, --file, or --url")
 			_ = cmd.Help()

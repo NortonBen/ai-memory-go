@@ -39,7 +39,8 @@ var cognifyCmd = &cobra.Command{
 			if session == "" {
 				session = "default"
 			}
-			color.Cyan("Sweeping for pending items in session: %s", session)
+			color.Cyan("Sweeping for pending/processing items in session: %s", session)
+			color.Cyan("Cognify will keep looping until no pending/processing DataPoint remains.")
 			err = eng.CognifyPending(ctx, session)
 			if err != nil {
 				color.Red("Cognify pending failed: %v", err)

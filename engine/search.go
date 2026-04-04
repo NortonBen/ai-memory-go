@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/schema"
@@ -50,13 +51,8 @@ func (e *defaultMemoryEngine) basicSearch(ctx context.Context, query *schema.Sea
 
 func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
 	// ---------------------------------------------------------
-	// Step 1: Input Processing (Vectorize + Extract Entities)
+	// Step 1: Input Processing (Vectorize + Extract Entities) in parallel
 	// ---------------------------------------------------------
-	emb, err := e.embedder.GenerateEmbedding(ctx, query.Text)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate embedding for query: %w", err)
-	}
-
 	// Fetch recent history Context for better entity resolution
 	historyContext := e.getHistoryBuffer(ctx, query.SessionID, 10)
 	var extractionInput = query.Text
@@ -64,14 +60,46 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 		extractionInput = fmt.Sprintf("HISTORY:\n%s\n\nCURRENT USER MESSAGE:\n%s", historyContext, query.Text)
 	}
 
+	var emb []float32
 	var extractedEntities []*schema.Node
-	if e.extractor != nil {
-		extractedNodes, err := e.extractor.ExtractEntities(ctx, extractionInput)
-		if err == nil {
-			for i := range extractedNodes {
-				extractedEntities = append(extractedEntities, &extractedNodes[i])
+	var embeddingErr error
+
+	var step1WG sync.WaitGroup
+	step1WG.Add(2)
+
+	go func() {
+		defer step1WG.Done()
+		emb, embeddingErr = e.embedder.GenerateEmbedding(ctx, query.Text)
+	}()
+
+	go func() {
+		defer step1WG.Done()
+		if query.Analysis != nil && len(query.Analysis.Subjects) > 0 {
+			for _, subject := range query.Analysis.Subjects {
+				extractedEntities = append(extractedEntities, &schema.Node{
+					ID:   subject,
+					Type: schema.NodeTypeEntity,
+					Properties: map[string]interface{}{
+						"name": subject,
+					},
+				})
+			}
+			return
+		}
+
+		if e.extractor != nil {
+			extractedNodes, err := e.extractor.ExtractEntities(ctx, extractionInput)
+			if err == nil {
+				for i := range extractedNodes {
+					extractedEntities = append(extractedEntities, &extractedNodes[i])
+				}
 			}
 		}
+	}()
+
+	step1WG.Wait()
+	if embeddingErr != nil {
+		return nil, fmt.Errorf("failed to generate embedding for query: %w", embeddingErr)
 	}
 
 	// Track scores per DataPoint ID
@@ -95,17 +123,39 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 	}
 
 	// ---------------------------------------------------------
-	// Step 2: Hybrid Search (Vector + Graph Anchors)
+	// Step 2: Multi-hop Retrieval (Vector + Graph) in parallel
 	// ---------------------------------------------------------
-	anchorNodeIDs := make(map[string]bool)
-	
-	// 2a. Vector Search
 	threshold := query.SimilarityThreshold
 	if threshold == 0 {
 		threshold = 0.45
 	}
-	vecResults, err := e.vectorStore.SimilaritySearch(ctx, emb, query.Limit, threshold)
-	if err == nil {
+
+	vectorScores := make(map[string]float64)
+	vectorAnchorNodeIDs := make(map[string]bool)
+	entityAnchorNodeIDs := make(map[string]bool)
+
+	var step2WG sync.WaitGroup
+	step2WG.Add(2)
+
+	// Branch A: Vector search
+	go func() {
+		defer step2WG.Done()
+
+		branchEmbedding := emb
+		if query.Analysis != nil && len(query.Analysis.SearchKeywords) > 0 {
+			searchText := strings.Join(query.Analysis.SearchKeywords, " ")
+			fmt.Printf(" [DEBUG Search] Using refined keywords: %s\n", searchText)
+			refinedEmb, err := e.embedder.GenerateEmbedding(ctx, searchText)
+			if err == nil {
+				branchEmbedding = refinedEmb
+			}
+		}
+
+		vecResults, err := e.vectorStore.SimilaritySearch(ctx, branchEmbedding, query.Limit, threshold)
+		if err != nil {
+			return
+		}
+
 		for _, vr := range vecResults {
 			sourceID := vr.ID
 			if isEntity, ok := vr.Metadata["is_entity"].(bool); ok && isEntity {
@@ -114,34 +164,54 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 				}
 			}
 
-			if item := trackDataPoint(sourceID); item != nil {
-				if vr.Score > item.vectorScore {
-					item.vectorScore = vr.Score
-				}
-				
-				linkedNodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", sourceID)
-				if err == nil {
-					for _, ln := range linkedNodes {
-						anchorNodeIDs[ln.ID] = true
-					}
+			if vr.Score > vectorScores[sourceID] {
+				vectorScores[sourceID] = vr.Score
+			}
+
+			linkedNodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", sourceID)
+			if err == nil {
+				for _, ln := range linkedNodes {
+					vectorAnchorNodeIDs[ln.ID] = true
 				}
 			}
 		}
+	}()
+
+	// Branch B: Graph anchors from extracted entities
+	go func() {
+		defer step2WG.Done()
+
+		for _, entity := range extractedEntities {
+			name, _ := entity.Properties["name"].(string)
+			if name == "" {
+				name = entity.ID
+			}
+			nodes, err := e.graphStore.FindNodesByEntity(ctx, name, entity.Type)
+			if err == nil {
+				for _, n := range nodes {
+					entityAnchorNodeIDs[n.ID] = true
+				}
+			} else {
+				fmt.Printf(" [DEBUG Search] Error searching for '%s': %v\n", name, err)
+			}
+		}
+	}()
+
+	step2WG.Wait()
+
+	// Merge vector and graph anchors
+	anchorNodeIDs := make(map[string]bool, len(vectorAnchorNodeIDs)+len(entityAnchorNodeIDs))
+	for id := range vectorAnchorNodeIDs {
+		anchorNodeIDs[id] = true
+	}
+	for id := range entityAnchorNodeIDs {
+		anchorNodeIDs[id] = true
 	}
 
-	// 2b. Graph Anchor Search (from Extracted Entities)
-	for _, entity := range extractedEntities {
-		name, _ := entity.Properties["name"].(string)
-		if name == "" {
-			name = entity.ID
-		}
-		nodes, err := e.graphStore.FindNodesByEntity(ctx, name, entity.Type)
-		if err == nil {
-			for _, n := range nodes {
-				anchorNodeIDs[n.ID] = true
-			}
-		} else {
-			fmt.Printf(" [DEBUG Search] Error searching for '%s': %v\n", name, err)
+	// Initialize tracked datapoints from vector branch results
+	for sourceID, score := range vectorScores {
+		if item := trackDataPoint(sourceID); item != nil {
+			item.vectorScore = score
 		}
 	}
 
@@ -171,7 +241,7 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 	}
 
 	// ---------------------------------------------------------
-	// Step 4: Context Assembly & Reranking
+	// Step 4: Context Fusion + Reranking
 	// ---------------------------------------------------------
 	var rankedItems []*itemScore
 	for _, item := range scores {
@@ -206,10 +276,10 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 	}
 
 	// ---------------------------------------------------------
-	// Step 4b: Context Assembly into a single string
+	// Step 4b: Build merged context string
 	// ---------------------------------------------------------
 	var contextBuilder strings.Builder
-	contextBuilder.WriteString("--- LIBRARIES FROM VECTOR SEARCH ---\n")
+	contextBuilder.WriteString("--- MEMORIES FROM VECTOR SEARCH ---\n")
 	for i, item := range rankedItems {
 		contextBuilder.WriteString(fmt.Sprintf("[%d] (Score: %.2f):\n%s\n", i+1, item.vectorScore, item.dp.Content))
 	}

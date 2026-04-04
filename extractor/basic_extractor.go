@@ -88,7 +88,18 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 			}
 		}
 
-		properties["name"] = entity.Name
+		// Normalize entity name. Some models may return empty name with only type/properties.
+		entityName := strings.TrimSpace(entity.Name)
+		if entityName == "" {
+			entityName = strings.TrimSpace(extractName(properties))
+		}
+		if entityName == "" {
+			entityName = strings.TrimSpace(entity.Type)
+		}
+		if entityName == "" {
+			entityName = "Entity"
+		}
+		properties["name"] = entityName
 
 		node := schema.NewNode(nodeType, properties)
 		nodes = append(nodes, *node)
@@ -534,4 +545,41 @@ Return a JSON object with:
 		Relationships:      result.Relationships,
 		Reasoning:          result.Reasoning,
 	}, nil
+}
+
+// AnalyzeQuery analyzes a user query for pre-think search optimization
+func (be *BasicExtractor) AnalyzeQuery(ctx context.Context, text string) (*schema.ThinkQueryAnalysis, error) {
+	prompt := fmt.Sprintf(`Analyze the following user query to optimize context retrieval from a memory system (Vector DB + Knowledge Graph).
+Extract the core intent, key subjects, and refined search keywords.
+
+User Query:
+%s
+
+INSTRUCTIONS:
+1. Identify the 'query_type':
+   - 'factual': Simple question about a person, place, or thing.
+   - 'relational': Question about how two or more things are connected.
+   - 'summarization': Request to summarize a topic or character.
+   - 'narrative': Question about plot points or story events.
+2. Extract 'subjects':
+   - These are specific named entities (Person, Place, Item) that should be used as anchors for Knowledge Graph traversal.
+3. Generate 'search_keywords':
+   - Optimized, standalone keywords for Vector similarity search. Expand abbreviations if possible.
+4. Define 'expected_answer':
+   - A brief description of what the user is looking for (e.g., "Identification of a character's rank and affiliation").
+
+Return a JSON object with:
+- query_type: string
+- subjects: array of strings
+- search_keywords: array of strings
+- expected_answer: string
+- reasoning: brief explanation of your analysis`, text)
+
+	var result schema.ThinkQueryAnalysis
+	_, err := be.provider.GenerateStructuredOutput(ctx, prompt, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze query: %w", err)
+	}
+
+	return &result, nil
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,25 @@ func (m *mockExtractor) ExtractBridgingRelationship(ctx context.Context, q, a st
 
 func (m *mockExtractor) CompareEntities(ctx context.Context, e1, e2 schema.Node) (*schema.ConsistencyResult, error) {
 	return &schema.ConsistencyResult{Action: schema.ResolutionUpdate, Reason: "mock"}, nil
+}
+
+func (m *mockExtractor) AnalyzeQuery(ctx context.Context, text string) (*schema.ThinkQueryAnalysis, error) {
+	if strings.Contains(text, "Lucian") {
+		return &schema.ThinkQueryAnalysis{
+			QueryType:      "factual",
+			Subjects:       []string{"Lucian"},
+			SearchKeywords: []string{"Lucian"},
+			ExpectedAnswer: "mock Lucian",
+			Reasoning:      "mock reasoning",
+		}, nil
+	}
+	return &schema.ThinkQueryAnalysis{
+		QueryType:      "factual",
+		Subjects:       []string{"mock"},
+		SearchKeywords: []string{"mock"},
+		ExpectedAnswer: "mock response",
+		Reasoning:      "mock reasoning",
+	}, nil
 }
 
 func (m *mockExtractor) ExtractWithSchema(ctx context.Context, text string, schemaStruct interface{}) (interface{}, error) {
@@ -211,16 +231,16 @@ func TestRequest(t *testing.T) {
 		// wait for Cognify task queue to process
 		time.Sleep(100 * time.Millisecond)
 
-		// Check storage
-		if len(store.dataPoints) != 1 {
-			t.Errorf("expected 1 data point stored, got %d", len(store.dataPoints))
+		// Check storage: parent input datapoint + at least one chunk datapoint
+		if len(store.dataPoints) < 2 {
+			t.Errorf("expected at least 2 data points stored (parent + chunk), got %d", len(store.dataPoints))
 		}
 
 		// Need to ensure the worker actually processed it. Since InMemory VectorStore is synchronous and 
 		// we submit to a worker pool, the sleep should suffice for this basic test.
 		count, _ := vecStore.GetEmbeddingCount(ctx)
-		if count != 1 {
-			t.Errorf("expected 1 embedding stored, got %d", count)
+		if count < 1 {
+			t.Errorf("expected at least 1 embedding stored, got %d", count)
 		}
 	})
 
@@ -315,4 +335,49 @@ func TestRequest(t *testing.T) {
 			t.Errorf("expected second message to be assistant")
 		}
 	})
+}
+
+func TestThinkIncludingAnalysis(t *testing.T) {
+	ext := &mockExtractor{}
+	store := newMockStorage()
+	graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+	vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
+	emb := &mockEmbedder{}
+
+	engine := NewMemoryEngineWithStores(ext, emb, store, graphStore, vecStore, EngineConfig{MaxWorkers: 1})
+	defer engine.Close()
+
+	ctx := context.Background()
+
+	// 1. Seed a node in the graph
+	graphStore.StoreNode(ctx, &schema.Node{
+		ID:   "Lucian",
+		Type: schema.NodeTypeEntity,
+		Properties: map[string]interface{}{
+			"name":        "Lucian",
+			"description": "A legendary warrior of light.",
+		},
+	})
+
+	// 2. Query with AnalyzeQuery = true
+	query := &schema.ThinkQuery{
+		Text:           "Who is Lucian?",
+		SessionID:      "test-session",
+		AnalyzeQuery:   true,
+		EnableThinking: false,
+	}
+
+	res, err := engine.Think(ctx, query)
+	if err != nil {
+		t.Fatalf("Think failed: %v", err)
+	}
+
+	if res.Analysis == nil {
+		t.Error("Expected Analysis result in ThinkResult, got nil")
+	}
+
+	// Verify the context includes information about Lucian (retrieved via analysis subjects/anchors)
+	if !strings.Contains(res.ContextUsed.ParsedContext, "Lucian") {
+		t.Errorf("Expected context to contain 'Lucian', got: %s", res.ContextUsed.ParsedContext)
+	}
 }

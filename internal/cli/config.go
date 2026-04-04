@@ -112,8 +112,15 @@ func createDefaultConfig() {
 	fmt.Printf("Created default configuration file at %s\n", configPath)
 }
 
-// InitEngine initializes a MemoryEngine based on viper config
-func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
+// RuntimeComponents groups runtime dependencies used by CLI features.
+type RuntimeComponents struct {
+	Engine     engine.MemoryEngine
+	GraphStore graph.GraphStore
+	VecStore   vector.VectorStore
+	RelStore   storage.RelationalStore
+}
+
+func initRuntime(ctx context.Context) (*RuntimeComponents, error) {
 	dataDir := viper.GetString("db.datadir")
 	if dataDir == "" {
 		home, _ := os.UserHomeDir()
@@ -234,5 +241,19 @@ func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
 	llmExt := extractor.NewBasicExtractor(llmProv, nil)
 
 	eng := engine.NewMemoryEngineWithStores(llmExt, embedder, relStore, graphStore, vecStore, engine.EngineConfig{MaxWorkers: 4})
-	return eng, nil
+	return &RuntimeComponents{
+		Engine:     eng,
+		GraphStore: graphStore,
+		VecStore:   vecStore,
+		RelStore:   relStore,
+	}, nil
+}
+
+// InitEngine initializes a MemoryEngine based on viper config
+func InitEngine(ctx context.Context) (engine.MemoryEngine, error) {
+	runtime, err := initRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.Engine, nil
 }
