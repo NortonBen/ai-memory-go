@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
 """
-Export a DeBERTa-v3 NER model to ONNX for use with the Go deberta extractor.
+Export a DeBERTa-v3 NER model to ONNX + tuỳ chọn quantize INT8.
 
-The model runs token-classification (IOB NER) entirely offline in Go via ONNX Runtime.
-Together with Harrier-OSS-v1-270m embeddings, this gives a fully offline
-embedding + knowledge-graph pipeline (no LLM server required).
+RAM footprint so sánh (trên disk / ONNX Runtime RSS khi chạy):
+  DeBERTa-v3-large   FP32  ~1.6 GB / ~2.5 GB   (mặc định cũ, chính xác nhất)
+  DeBERTa-v3-base    FP32  ~0.4 GB / ~0.7 GB   ← khuyến nghị (đủ tốt cho CoNLL)
+  DeBERTa-v3-large   INT8  ~0.4 GB / ~0.6 GB   (quantize, nhanh hơn nhưng kém hơn một chút)
+  DeBERTa-v3-base    INT8  ~0.1 GB / ~0.2 GB   ← nhỏ nhất, tốt cho môi trường RAM giới hạn
+
+Dùng với Harrier-OSS-v1-270m (1.0 GB) → tổng RSS:
+  base FP32 + Harrier CPU : ~1.7 GB   ← mặc định khuyến nghị
+  base INT8 + Harrier CPU : ~1.2 GB
+  large FP32 + Harrier CPU: ~3.5 GB
 
 Usage:
-    # Recommended: DeBERTa-v3-large fine-tuned on CoNLL-2003
-    python scripts/export_deberta_onnx.py \
-        --model Gladiator/microsoft-deberta-v3-large_ner_conll2003 \
+    # Khuyến nghị: DeBERTa-v3-base (nhỏ, nhanh, CoNLL-2003)
+    python scripts/export_deberta_onnx.py \\
+        --size base \\
         --output data/deberta-ner
 
-    # Smaller / faster alternative (DeBERTa-v3-base)
-    python scripts/export_deberta_onnx.py \
-        --model lxyuan/deberta-v3-base-multilingual-cased \
-        --output data/deberta-ner-base
+    # Chính xác nhất: DeBERTa-v3-large
+    python scripts/export_deberta_onnx.py \\
+        --size large \\
+        --output data/deberta-ner-large
+
+    # Nhỏ nhất: base + INT8 quantize
+    python scripts/export_deberta_onnx.py \\
+        --size base --quantize \\
+        --output data/deberta-ner-q
+
+    # Dùng model tuỳ chỉnh
+    python scripts/export_deberta_onnx.py \\
+        --model Gladiator/microsoft-deberta-v3-large_ner_conll2003 \\
+        --output data/deberta-ner-large
 
 Output files:
     data/deberta-ner/
-      model.onnx        — ONNX NER model
+      model.onnx        — ONNX NER model (FP32 hoặc INT8)
       tokenizer.json    — SentencePiece Unigram tokenizer (for Go)
       labels.json       — {"0":"O","1":"B-PER","2":"I-PER",...}
 """
@@ -29,17 +46,40 @@ import json
 import os
 import sys
 
+# Map alias → HuggingFace model ID
+_SIZE_MAP = {
+    "base":  "Gladiator/microsoft-deberta-v3-base_ner_conll2003",
+    "large": "Gladiator/microsoft-deberta-v3-large_ner_conll2003",
+}
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        default="Gladiator/microsoft-deberta-v3-large_ner_conll2003",
-        help="HuggingFace model name or local path",
+        default="",
+        help="HuggingFace model name or local path (takes precedence over --size)",
+    )
+    parser.add_argument(
+        "--size",
+        choices=["base", "large"],
+        default="base",
+        help="Model size alias: 'base' (~400 MB, khuyến nghị) hoặc 'large' (~1.6 GB). "
+             "Bị ghi đè bởi --model nếu có.",
     )
     parser.add_argument("--output", default="data/deberta-ner")
-    parser.add_argument("--seq-len", type=int, default=512)
+    parser.add_argument("--seq-len", type=int, default=256,
+                        help="Max sequence length (256 đủ cho NER, tiết kiệm RAM hơn 512)")
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Quantize INT8 sau khi export (giảm ~4x kích thước, tăng tốc CPU)",
+    )
     args = parser.parse_args()
+
+    # Resolve model name
+    if not args.model:
+        args.model = _SIZE_MAP[args.size]
 
     os.makedirs(args.output, exist_ok=True)
 
@@ -146,6 +186,28 @@ def main():
         print("FATAL: all export strategies failed.", file=sys.stderr)
         sys.exit(1)
 
+    # ── INT8 Quantization (optional) ──────────────────────────────────────────
+    if args.quantize:
+        print(f"\n[3b] INT8 Dynamic Quantization …")
+        try:
+            from onnxruntime.quantization import quantize_dynamic, QuantType
+            q_path = target_path.replace(".onnx", "_int8.onnx")
+            quantize_dynamic(
+                target_path,
+                q_path,
+                weight_type=QuantType.QInt8,
+            )
+            orig_mb = os.path.getsize(target_path) / 1e6
+            q_mb = os.path.getsize(q_path) / 1e6
+            print(f"    FP32 : {orig_mb:.1f} MB → INT8 : {q_mb:.1f} MB  "
+                  f"(giảm {orig_mb/q_mb:.1f}x)")
+            # Replace FP32 with INT8
+            import shutil
+            shutil.move(q_path, target_path)
+            print(f"    → {target_path}  (INT8)")
+        except Exception as e:
+            print(f"    warn quantize: {e} — sử dụng FP32 thay thế")
+
     # ── Verify ────────────────────────────────────────────────────────────────
     print(f"\n[4/4] Verifying ONNX model …")
     try:
@@ -178,17 +240,23 @@ def main():
         print(f"    warn verify: {e}")
 
     size_mb = os.path.getsize(target_path) / 1e6
-    print(f"\n✅  Done! model.onnx = {size_mb:.1f} MB")
+    quant_str = " (INT8)" if args.quantize else " (FP32)"
+    print(f"\n✅  Done! model.onnx = {size_mb:.1f} MB{quant_str}")
+    print(f"    Model  : {args.model}")
     print(f"    Output : {os.path.abspath(args.output)}/")
     print(f"""
-Add to your Go code:
+RAM ước tính khi chạy:
+  ONNX Runtime (CPU) : ~{size_mb * 1.5:.0f} MB
+  + Harrier CPU      : ~1 500 MB
+  Tổng               : ~{size_mb * 1.5 + 1500:.0f} MB
+
+Go code:
     deb, _ := deberta.NewExtractor(deberta.Config{{
         ModelPath:     "{args.output}/model.onnx",
         TokenizerPath: "{args.output}/tokenizer.json",
         LabelsPath:    "{args.output}/labels.json",
         MaxSeqLen:     {args.seq_len},
     }})
-    eng := engine.NewMemoryEngineWithStores(deb, harrierEmb, ...)
 """)
 
 

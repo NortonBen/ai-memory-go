@@ -11,6 +11,15 @@
 //	      ──► schema.Node (Entity/Concept/...)
 //	      ──► co-occurrence edges               → schema.Edge (RELATED_TO / SIMILAR_TO)
 //
+// # GPU / Execution providers
+//
+// Control via the ORT_PROVIDER environment variable or Config.ExecProvider:
+//
+//	ORT_PROVIDER=coreml   Apple Silicon GPU + Neural Engine (macOS default)
+//	ORT_PROVIDER=cuda     NVIDIA GPU (Linux/Windows)
+//	ORT_PROVIDER=cpu      Force CPU only
+//	ORT_PROVIDER=auto     Auto-detect (default)
+//
 // # Setup
 //
 //  1. Export model:
@@ -18,7 +27,8 @@
 //     --model Gladiator/microsoft-deberta-v3-large_ner_conll2003 \
 //     --output data/deberta-ner
 //
-//  2. Install ONNX Runtime (macOS): brew install onnxruntime
+//  2. Install ONNX Runtime (macOS):
+//     brew install onnxruntime
 //
 // # Go usage
 //
@@ -27,6 +37,7 @@
 //	    TokenizerPath: "data/deberta-ner/tokenizer.json",
 //	    LabelsPath:    "data/deberta-ner/labels.json",
 //	    MaxSeqLen:     512,
+//	    ExecProvider:  "coreml",  // or "" to read ORT_PROVIDER env
 //	})
 //	eng := engine.NewMemoryEngineWithStores(deb, harrierEmb, ...)
 package deberta
@@ -64,9 +75,12 @@ type Config struct {
 	// MaxSeqLen is the maximum sequence length fed to the model (default: 512).
 	MaxSeqLen int
 
+	// ExecProvider selects the ORT execution provider.
+	// Valid values: "cpu", "coreml", "cuda", "auto" (default: read ORT_PROVIDER env, then "auto").
+	ExecProvider string
+
 	// OrtLibPath overrides the ONNX Runtime shared library path.
-	// If empty, standard paths are searched (/opt/homebrew/lib, etc.)
-	// or the ORT_LIB_PATH env variable is used.
+	// If empty, standard paths are searched or ORT_LIB_PATH env is used.
 	OrtLibPath string
 }
 
@@ -80,17 +94,26 @@ type entitySpan struct {
 // ─── Extractor ────────────────────────────────────────────────────────────────
 
 // Extractor implements extractor.LLMExtractor using DeBERTa-v3 NER.
-// It is goroutine-safe: inference sessions are created per call.
+// It holds a persistent ONNX session and pre-allocated tensors for low-latency
+// inference (especially important on GPU where session creation is expensive).
 type Extractor struct {
-	cfg       Config
-	tokenizer *Tokenizer
-	labels    []string // label index → IOB string (e.g. "B-PER")
-	mu        sync.Mutex
+	cfg            Config
+	tokenizer      *Tokenizer
+	labels         []string // label index → IOB string (e.g. "B-PER")
+	activeProvider string   // actual ORT provider used
+
+	// Persistent session and tensors (guarded by mu)
+	session     *ort.AdvancedSession
+	inputIDs    *ort.Tensor[int64]
+	attnMask    *ort.Tensor[int64]
+	typeIDs     *ort.Tensor[int64] // nil if model doesn't need token_type_ids
+	logitsTensor *ort.Tensor[float32]
+	mu          sync.Mutex
 }
 
 var ortOnce sync.Once
 
-// NewExtractor loads the tokenizer, label map, and verifies the ONNX model path.
+// NewExtractor loads the tokenizer, label map, and creates a persistent ONNX session.
 func NewExtractor(cfg Config) (*Extractor, error) {
 	if cfg.MaxSeqLen <= 0 {
 		cfg.MaxSeqLen = 512
@@ -110,9 +133,10 @@ func NewExtractor(cfg Config) (*Extractor, error) {
 		return nil, fmt.Errorf("deberta: model not found at %q: %w", cfg.ModelPath, err)
 	}
 
+	// Resolve execution provider
+	cfg.ExecProvider = resolveProvider(cfg.ExecProvider)
+
 	// Init ORT environment once per process.
-	// If Harrier (or another ONNX embedder) already initialised ORT, we just
-	// reuse the existing environment — the "already initialized" error is safe to ignore.
 	var initErr error
 	ortOnce.Do(func() {
 		libPath := cfg.OrtLibPath
@@ -147,8 +171,7 @@ func NewExtractor(cfg Config) (*Extractor, error) {
 			ort.SetSharedLibraryPath(libPath)
 		}
 		err := ort.InitializeEnvironment()
-		// "already initialized" is expected when another ONNX model (e.g. Harrier)
-		// has already called InitializeEnvironment in the same process.
+		// Ignore "already initialized" — another ONNX model (e.g. Harrier) may have done it first.
 		if err != nil && !strings.Contains(err.Error(), "already been initialized") {
 			initErr = err
 		}
@@ -157,12 +180,136 @@ func NewExtractor(cfg Config) (*Extractor, error) {
 		return nil, fmt.Errorf("deberta: init ORT: %w", initErr)
 	}
 
-	return &Extractor{
+	e := &Extractor{
 		cfg:       cfg,
 		tokenizer: tok,
 		labels:    labels,
-	}, nil
+	}
+
+	if err := e.loadSession(); err != nil {
+		return nil, err
+	}
+
+	return e, nil
 }
+
+// loadSession creates the persistent ONNX session with pre-allocated tensors.
+func (e *Extractor) loadSession() error {
+	seqLen := e.cfg.MaxSeqLen
+	numLabels := len(e.labels)
+	if numLabels == 0 {
+		numLabels = 9
+	}
+
+	shape := ort.NewShape(1, int64(seqLen))
+	outShape := ort.NewShape(1, int64(seqLen), int64(numLabels))
+
+	inputIDs, err := ort.NewEmptyTensor[int64](shape)
+	if err != nil {
+		return fmt.Errorf("deberta: create input_ids tensor: %w", err)
+	}
+
+	attnMask, err := ort.NewEmptyTensor[int64](shape)
+	if err != nil {
+		inputIDs.Destroy()
+		return fmt.Errorf("deberta: create attention_mask tensor: %w", err)
+	}
+
+	logitsTensor, err := ort.NewEmptyTensor[float32](outShape)
+	if err != nil {
+		inputIDs.Destroy()
+		attnMask.Destroy()
+		return fmt.Errorf("deberta: create logits tensor: %w", err)
+	}
+
+	// Build session options with execution provider
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		inputIDs.Destroy()
+		attnMask.Destroy()
+		logitsTensor.Destroy()
+		return fmt.Errorf("deberta: session options: %w", err)
+	}
+	defer opts.Destroy()
+
+	used, provErr := applyExecutionProvider(opts, e.cfg.ExecProvider)
+	if provErr != nil {
+		inputIDs.Destroy()
+		attnMask.Destroy()
+		logitsTensor.Destroy()
+		return fmt.Errorf("deberta: execution provider: %w", provErr)
+	}
+	e.activeProvider = used
+
+	// Try creating session with input_ids + attention_mask first.
+	session, err := ort.NewAdvancedSession(
+		e.cfg.ModelPath,
+		[]string{"input_ids", "attention_mask"},
+		[]string{"logits"},
+		[]ort.ArbitraryTensor{inputIDs, attnMask},
+		[]ort.ArbitraryTensor{logitsTensor},
+		opts,
+	)
+	if err != nil {
+		// Some models also require token_type_ids (all zeros).
+		typeIDs, terr := ort.NewEmptyTensor[int64](shape)
+		if terr != nil {
+			inputIDs.Destroy()
+			attnMask.Destroy()
+			logitsTensor.Destroy()
+			return fmt.Errorf("deberta: create token_type_ids tensor: %w", terr)
+		}
+
+		session2, err2 := ort.NewAdvancedSession(
+			e.cfg.ModelPath,
+			[]string{"input_ids", "attention_mask", "token_type_ids"},
+			[]string{"logits"},
+			[]ort.ArbitraryTensor{inputIDs, attnMask, typeIDs},
+			[]ort.ArbitraryTensor{logitsTensor},
+			opts,
+		)
+		if err2 != nil {
+			inputIDs.Destroy()
+			attnMask.Destroy()
+			logitsTensor.Destroy()
+			typeIDs.Destroy()
+			return fmt.Errorf("deberta: create session (with/without token_type_ids): %w / %w", err, err2)
+		}
+		e.typeIDs = typeIDs
+		session = session2
+	}
+
+	e.session = session
+	e.inputIDs = inputIDs
+	e.attnMask = attnMask
+	e.logitsTensor = logitsTensor
+	return nil
+}
+
+// Close releases the ONNX session and tensors.
+func (e *Extractor) Close() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.session != nil {
+		e.session.Destroy()
+		e.session = nil
+	}
+	if e.inputIDs != nil {
+		e.inputIDs.Destroy()
+	}
+	if e.attnMask != nil {
+		e.attnMask.Destroy()
+	}
+	if e.typeIDs != nil {
+		e.typeIDs.Destroy()
+	}
+	if e.logitsTensor != nil {
+		e.logitsTensor.Destroy()
+	}
+}
+
+// GetExecutionProvider returns the active ORT execution provider (e.g. "coreml", "cuda", "cpu").
+func (e *Extractor) GetExecutionProvider() string { return e.activeProvider }
 
 // ─── extractor.LLMExtractor interface ─────────────────────────────────────────
 
@@ -182,7 +329,6 @@ func (e *Extractor) ExtractEntities(ctx context.Context, text string) ([]schema.
 }
 
 // ExtractRelationships generates co-occurrence edges between extracted entities.
-// Entities that appear in the same sentence get a RELATED_TO (or SIMILAR_TO if same type) edge.
 func (e *Extractor) ExtractRelationships(_ context.Context, text string, entities []schema.Node) ([]schema.Edge, error) {
 	if len(entities) < 2 {
 		return nil, nil
@@ -192,7 +338,6 @@ func (e *Extractor) ExtractRelationships(_ context.Context, text string, entitie
 	var edges []schema.Edge
 
 	for _, sent := range sentences {
-		// Collect entities whose surface form appears in this sentence
 		var inSent []schema.Node
 		sentLower := strings.ToLower(sent)
 		for _, n := range entities {
@@ -201,7 +346,6 @@ func (e *Extractor) ExtractRelationships(_ context.Context, text string, entitie
 				inSent = append(inSent, n)
 			}
 		}
-		// Create edges between every pair in same sentence
 		for i := 0; i < len(inSent); i++ {
 			for j := i + 1; j < len(inSent); j++ {
 				a, b := inSent[i], inSent[j]
@@ -211,8 +355,8 @@ func (e *Extractor) ExtractRelationships(_ context.Context, text string, entitie
 				}
 				edge := schema.NewEdge(a.ID, b.ID, edgeType, 0.8)
 				edge.Properties = map[string]interface{}{
-					"context": "co-occurrence",
-					"source":  "deberta-ner",
+					"context":  "co-occurrence",
+					"source":   "deberta-ner",
 					"sentence": truncate(sent, 120),
 				}
 				edges = append(edges, *edge)
@@ -222,25 +366,19 @@ func (e *Extractor) ExtractRelationships(_ context.Context, text string, entitie
 	return edges, nil
 }
 
-// ExtractBridgingRelationship is not supported by NER — returns nil.
 func (e *Extractor) ExtractBridgingRelationship(_ context.Context, _, _ string) (*schema.Edge, error) {
 	return nil, nil
 }
 
-// ExtractRequestIntent is not supported by NER — returns nil.
 func (e *Extractor) ExtractRequestIntent(_ context.Context, _ string) (*schema.RequestIntent, error) {
 	return nil, nil
 }
 
-// CompareEntities performs an exact-match comparison on entity names.
-// DeBERTa does not have generation capability so we use simple heuristics.
 func (e *Extractor) CompareEntities(_ context.Context, existing schema.Node, newEntity schema.Node) (*schema.ConsistencyResult, error) {
 	existName, _ := existing.Properties["name"].(string)
 	newName, _ := newEntity.Properties["name"].(string)
-
 	existLow := strings.ToLower(strings.TrimSpace(existName))
 	newLow := strings.ToLower(strings.TrimSpace(newName))
-
 	switch {
 	case existLow == newLow:
 		return &schema.ConsistencyResult{Action: schema.ResolutionIgnore, Reason: "same name"}, nil
@@ -251,12 +389,10 @@ func (e *Extractor) CompareEntities(_ context.Context, existing schema.Node, new
 	}
 }
 
-// ExtractWithSchema is not supported — returns nil.
 func (e *Extractor) ExtractWithSchema(_ context.Context, _ string, _ interface{}) (interface{}, error) {
 	return nil, nil
 }
 
-// AnalyzeQuery returns a basic keyword-based analysis without LLM.
 func (e *Extractor) AnalyzeQuery(_ context.Context, text string) (*schema.ThinkQueryAnalysis, error) {
 	words := strings.Fields(text)
 	keywords := make([]string, 0, len(words))
@@ -272,15 +408,13 @@ func (e *Extractor) AnalyzeQuery(_ context.Context, text string) (*schema.ThinkQ
 	}, nil
 }
 
-// SetProvider is a no-op (DeBERTa doesn't use an LLM provider).
 func (e *Extractor) SetProvider(_ extractor.LLMProvider) {}
-
-// GetProvider returns nil (no LLM provider).
-func (e *Extractor) GetProvider() extractor.LLMProvider { return nil }
+func (e *Extractor) GetProvider() extractor.LLMProvider  { return nil }
 
 // ─── Core NER inference ───────────────────────────────────────────────────────
 
-// runNER tokenizes text, runs ONNX inference, and decodes IOB entity spans.
+// runNER tokenizes text, fills pre-allocated tensors, runs the persistent session,
+// and decodes IOB entity spans.
 func (e *Extractor) runNER(_ context.Context, text string) ([]entitySpan, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -288,75 +422,36 @@ func (e *Extractor) runNER(_ context.Context, text string) ([]entitySpan, error)
 	seqLen := e.cfg.MaxSeqLen
 
 	// 1. Tokenize
-	tokenIDs, wordIDs := e.tokenizer.Encode(text, true /*CLS*/, true /*SEP*/)
+	tokenIDs, wordIDs := e.tokenizer.Encode(text, true, true)
 	paddedIDs, paddedWordIDs, mask := e.tokenizer.BuildAttentionMask(tokenIDs, wordIDs, seqLen)
 
-	// 2. Build ORT input tensors
-	shape := ort.NewShape(1, int64(seqLen))
-
-	inputIDsTensor, err := ort.NewEmptyTensor[int64](shape)
-	if err != nil {
-		return nil, fmt.Errorf("deberta: create input_ids tensor: %w", err)
-	}
-	defer inputIDsTensor.Destroy()
-
-	attnTensor, err := ort.NewEmptyTensor[int64](shape)
-	if err != nil {
-		return nil, fmt.Errorf("deberta: create attention_mask tensor: %w", err)
-	}
-	defer attnTensor.Destroy()
-
+	// 2. Fill pre-allocated tensors (avoids per-call allocation)
+	inputData := e.inputIDs.GetData()
+	attnData := e.attnMask.GetData()
 	for i := 0; i < seqLen; i++ {
-		inputIDsTensor.GetData()[i] = int64(paddedIDs[i])
-		attnTensor.GetData()[i] = int64(mask[i])
+		inputData[i] = int64(paddedIDs[i])
+		attnData[i] = int64(mask[i])
 	}
-
-	// 3. Output: logits [1, seqLen, numLabels]
-	numLabels := len(e.labels)
-	if numLabels == 0 {
-		numLabels = 9 // CoNLL-2003 default
-	}
-	outShape := ort.NewShape(1, int64(seqLen), int64(numLabels))
-	logitsTensor, err := ort.NewEmptyTensor[float32](outShape)
-	if err != nil {
-		return nil, fmt.Errorf("deberta: create logits tensor: %w", err)
-	}
-	defer logitsTensor.Destroy()
-
-	// 4. Run inference (new session per call — avoids thread-safety issues)
-	opts, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, fmt.Errorf("deberta: session options: %w", err)
-	}
-	defer opts.Destroy()
-
-	// Try with both input_ids + attention_mask first; some models also need token_type_ids.
-	session, err := ort.NewAdvancedSession(
-		e.cfg.ModelPath,
-		[]string{"input_ids", "attention_mask"},
-		[]string{"logits"},
-		[]ort.ArbitraryTensor{inputIDsTensor, attnTensor},
-		[]ort.ArbitraryTensor{logitsTensor},
-		opts,
-	)
-	if err != nil {
-		// Retry with token_type_ids (all zeros)
-		session, err = e.runWithTokenTypeIDs(paddedIDs, mask, logitsTensor, opts)
-		if err != nil {
-			return nil, fmt.Errorf("deberta: create session: %w", err)
+	if e.typeIDs != nil {
+		typeData := e.typeIDs.GetData()
+		for i := range typeData {
+			typeData[i] = 0
 		}
 	}
-	defer session.Destroy()
 
-	if err := session.Run(); err != nil {
+	// 3. Run persistent session
+	if err := e.session.Run(); err != nil {
 		return nil, fmt.Errorf("deberta: inference: %w", err)
 	}
 
-	// 5. Decode IOB spans
-	rawLogits := logitsTensor.GetData() // flat [seqLen * numLabels]
+	// 4. Decode IOB spans
+	numLabels := len(e.labels)
+	if numLabels == 0 {
+		numLabels = 9
+	}
+	rawLogits := e.logitsTensor.GetData()
 	tokenLabels := argmaxLabels(rawLogits, seqLen, numLabels, e.labels)
 
-	// Aggregate to word-level (first subword token per word)
 	wordLabelMap := make(map[int]string)
 	maxWord := -1
 	for i, wid := range paddedWordIDs {
@@ -380,52 +475,12 @@ func (e *Extractor) runNER(_ context.Context, text string) ([]entitySpan, error)
 		}
 	}
 
-	// Split original text into words (same order as tokenizer)
 	words := splitWords(text)
-
 	return decodeIOB(wordLabels, words), nil
-}
-
-// runWithTokenTypeIDs creates a session that includes token_type_ids (all zeros).
-func (e *Extractor) runWithTokenTypeIDs(paddedIDs, mask []int32, logitsTensor *ort.Tensor[float32], opts *ort.SessionOptions) (*ort.AdvancedSession, error) {
-	seqLen := len(paddedIDs)
-	shape := ort.NewShape(1, int64(seqLen))
-
-	inputIDsTensor, err := ort.NewEmptyTensor[int64](shape)
-	if err != nil {
-		return nil, err
-	}
-	attnTensor, err := ort.NewEmptyTensor[int64](shape)
-	if err != nil {
-		inputIDsTensor.Destroy()
-		return nil, err
-	}
-	typeTensor, err := ort.NewEmptyTensor[int64](shape)
-	if err != nil {
-		inputIDsTensor.Destroy()
-		attnTensor.Destroy()
-		return nil, err
-	}
-
-	for i := 0; i < seqLen; i++ {
-		inputIDsTensor.GetData()[i] = int64(paddedIDs[i])
-		attnTensor.GetData()[i] = int64(mask[i])
-		typeTensor.GetData()[i] = 0
-	}
-
-	return ort.NewAdvancedSession(
-		e.cfg.ModelPath,
-		[]string{"input_ids", "attention_mask", "token_type_ids"},
-		[]string{"logits"},
-		[]ort.ArbitraryTensor{inputIDsTensor, attnTensor, typeTensor},
-		[]ort.ArbitraryTensor{logitsTensor},
-		opts,
-	)
 }
 
 // ─── Decode helpers ───────────────────────────────────────────────────────────
 
-// argmaxLabels returns the IOB label string for each token position.
 func argmaxLabels(logits []float32, seqLen, numLabels int, labels []string) []string {
 	result := make([]string, seqLen)
 	for i := 0; i < seqLen; i++ {
@@ -446,7 +501,6 @@ func argmaxLabels(logits []float32, seqLen, numLabels int, labels []string) []st
 	return result
 }
 
-// decodeIOB converts word-level IOB2 labels and original words into entity spans.
 func decodeIOB(wordLabels, words []string) []entitySpan {
 	var spans []entitySpan
 	var curLabel string
@@ -468,25 +522,21 @@ func decodeIOB(wordLabels, words []string) []entitySpan {
 		if i < len(words) {
 			word = words[i]
 		}
-
 		switch {
 		case strings.HasPrefix(lbl, "B-"):
 			flush()
 			curLabel = lbl[2:]
 			curWords = []string{word}
-
 		case strings.HasPrefix(lbl, "I-"):
 			nerClass := lbl[2:]
 			if curLabel == nerClass {
 				curWords = append(curWords, word)
 			} else {
-				// Broken I- without matching B- → start new entity
 				flush()
 				curLabel = nerClass
 				curWords = []string{word}
 			}
-
-		default: // "O" or unknown
+		default:
 			flush()
 		}
 	}
@@ -494,25 +544,15 @@ func decodeIOB(wordLabels, words []string) []entitySpan {
 	return spans
 }
 
-// spanToNode converts a NER entity span to a schema.Node.
 func spanToNode(sp entitySpan) schema.Node {
 	var nodeType schema.NodeType
 	switch sp.label {
-	case "PER":
+	case "PER", "ORG", "LOC":
 		nodeType = schema.NodeTypeEntity
-	case "ORG":
-		nodeType = schema.NodeTypeEntity
-	case "LOC":
-		nodeType = schema.NodeTypeEntity
-	case "MISC":
-		nodeType = schema.NodeTypeConcept
 	default:
-		nodeType = schema.NodeTypeEntity
+		nodeType = schema.NodeTypeConcept
 	}
-
-	// Strip trailing/leading punctuation from surface form
 	surface := strings.Trim(sp.surface, ".,;:!?\"'()")
-
 	node := schema.NewNode(nodeType, map[string]interface{}{
 		"name":      surface,
 		"ner_label": sp.label,
@@ -523,7 +563,6 @@ func spanToNode(sp entitySpan) schema.Node {
 
 // ─── Text utilities ───────────────────────────────────────────────────────────
 
-// splitSentences splits text into sentences on [.!?] boundaries.
 func splitSentences(text string) []string {
 	var sents []string
 	start := 0
@@ -546,7 +585,6 @@ func splitSentences(text string) []string {
 	return sents
 }
 
-// splitWords splits text into whitespace-separated words (for word alignment).
 func splitWords(text string) []string {
 	var words []string
 	var buf strings.Builder
@@ -566,7 +604,6 @@ func splitWords(text string) []string {
 	return words
 }
 
-// loadLabels reads the labels.json file ({"0":"O","1":"B-PER",...}).
 func loadLabels(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -576,7 +613,6 @@ func loadLabels(path string) ([]string, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse labels: %w", err)
 	}
-	// Find max index
 	maxIdx := -1
 	for k := range raw {
 		if idx, err := strconv.Atoi(k); err == nil && idx > maxIdx {

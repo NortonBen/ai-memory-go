@@ -102,3 +102,48 @@ build-harrier-onnx:
 		--model microsoft/harrier-oss-v1-270m \
 		--output data/harrier \
 		--seq-len 512 2>&1
+
+# Export DeBERTa NER models (chọn size theo nhu cầu RAM)
+# ─────────────────────────────────────────────────────────────────────────
+# base (~400 MB, ~0.7 GB RSS) — khuyến nghị cho development
+export-deberta-base:
+	source .venv/bin/activate && python3 scripts/export_deberta_onnx.py \
+		--size base --output data/deberta-ner-base --seq-len 256
+
+# base + INT8 quantize (~100 MB, ~0.2 GB RSS) — nhỏ nhất
+export-deberta-base-q:
+	source .venv/bin/activate && python3 scripts/export_deberta_onnx.py \
+		--size base --quantize --output data/deberta-ner-base-q --seq-len 256
+
+# large (~1.6 GB, ~2.5 GB RSS) — chính xác nhất
+export-deberta-large:
+	source .venv/bin/activate && python3 scripts/export_deberta_onnx.py \
+		--size large --output data/deberta-ner --seq-len 256
+
+# large + INT8 quantize (~400 MB, ~0.6 GB RSS)
+export-deberta-large-q:
+	source .venv/bin/activate && python3 scripts/export_deberta_onnx.py \
+		--size large --quantize --output data/deberta-ner-q --seq-len 256
+
+# Quantize models đã export sang INT8 (không cần download lại)
+quantize-deberta:
+	source .venv/bin/activate && python3 -c "\
+import shutil, os; \
+from onnxruntime.quantization import quantize_dynamic, QuantType; \
+os.makedirs('data/deberta-ner-q', exist_ok=True); \
+quantize_dynamic('data/deberta-ner/model.onnx', 'data/deberta-ner-q/model.onnx', weight_type=QuantType.QInt8); \
+[shutil.copy(f'data/deberta-ner/{f}', 'data/deberta-ner-q/') for f in os.listdir('data/deberta-ner') if f != 'model.onnx']; \
+print('Done:', round(os.path.getsize('data/deberta-ner-q/model.onnx')/1e6), 'MB')"
+
+quantize-harrier:
+	source .venv/bin/activate && python3 -c "\
+import shutil, os; \
+from onnxruntime.quantization import quantize_dynamic, QuantType; \
+os.makedirs('data/harrier-q', exist_ok=True); \
+quantize_dynamic('data/harrier/model.onnx', 'data/harrier-q/model.onnx', weight_type=QuantType.QInt8); \
+[shutil.copy(f'data/harrier/{f}', 'data/harrier-q/') for f in os.listdir('data/harrier') if f != 'model.onnx']; \
+print('Done:', round(os.path.getsize('data/harrier-q/model.onnx')/1e6), 'MB')"
+
+quantize-all: quantize-deberta quantize-harrier
+
+.PHONY: export-deberta-base export-deberta-base-q export-deberta-large export-deberta-large-q quantize-deberta quantize-harrier quantize-all

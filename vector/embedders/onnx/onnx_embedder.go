@@ -98,16 +98,23 @@ type HarrierEmbedder struct {
 	maxSeqLen     int
 	queryTask     string
 	useQueryInst  bool
+	execProvider  string // "cpu", "coreml", "cuda", "auto"
 
-	tokenizer *Tokenizer
-	session   *ort.AdvancedSession
+	tokenizer    *Tokenizer
+	session      *ort.AdvancedSession
+	activeProvider string // actual provider used (set after loadSession)
 
 	mu sync.Mutex
 }
 
 // NewHarrierEmbedder loads the ONNX model and tokenizer from disk.
 // It initialises the ONNX Runtime environment on first call.
-// Set the ORT_LIB_PATH env variable to point to libonnxruntime.dylib/.so/.dll if not in standard paths.
+//
+// Execution provider is resolved from (highest to lowest priority):
+//  1. ORT_PROVIDER env var ("cpu", "coreml", "cuda", "auto")
+//  2. Default: "auto" (CoreML on macOS, CUDA on Linux, CPU fallback)
+//
+// Set ORT_LIB_PATH to override the ONNX Runtime shared library path.
 func NewHarrierEmbedder(modelPath, tokenizerPath string, maxSeqLen int, queryTask string, useQueryInst bool) (*HarrierEmbedder, error) {
 	if _, err := os.Stat(modelPath); err != nil {
 		return nil, fmt.Errorf("onnx harrier: model file not found at %q: %w", modelPath, err)
@@ -167,6 +174,7 @@ func NewHarrierEmbedder(modelPath, tokenizerPath string, maxSeqLen int, queryTas
 		maxSeqLen:     maxSeqLen,
 		queryTask:     queryTask,
 		useQueryInst:  useQueryInst,
+		execProvider:  resolveProvider(""),
 		tokenizer:     tok,
 	}
 
@@ -209,6 +217,16 @@ func (e *HarrierEmbedder) loadSession() error {
 		return fmt.Errorf("onnx harrier: session options: %w", err)
 	}
 	defer opts.Destroy()
+
+	// Apply execution provider (CoreML / CUDA / CPU)
+	used, provErr := applyExecutionProvider(opts, e.execProvider)
+	if provErr != nil {
+		inputIDs.Destroy()
+		attnMask.Destroy()
+		hiddenState.Destroy()
+		return fmt.Errorf("onnx harrier: execution provider: %w", provErr)
+	}
+	e.activeProvider = used
 
 	session, err := ort.NewAdvancedSession(
 		e.modelPath,
@@ -262,6 +280,9 @@ func (e *HarrierEmbedder) GetDimensions() int { return harrierDim }
 
 // GetModel implements vector.EmbeddingProvider.
 func (e *HarrierEmbedder) GetModel() string { return modelName }
+
+// GetExecutionProvider returns the active ORT execution provider (e.g. "coreml", "cuda", "cpu").
+func (e *HarrierEmbedder) GetExecutionProvider() string { return e.activeProvider }
 
 // Health implements vector.EmbeddingProvider.
 func (e *HarrierEmbedder) Health(ctx context.Context) error {
