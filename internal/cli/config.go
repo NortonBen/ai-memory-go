@@ -110,6 +110,7 @@ func createDefaultConfig() {
 	// ONNX / Harrier-OSS-v1-270m local embedding (set embedder.provider: onnx to activate)
 	viper.Set("embedder.onnx.model_path", "")
 	viper.Set("embedder.onnx.tokenizer_path", "")
+	viper.Set("embedder.onnx.model_precision", "") // auto | fp32 | int8 (see onnxmodel)
 	viper.Set("embedder.onnx.max_seq_len", 512)
 	viper.Set("embedder.onnx.query_task", "Retrieve semantically similar text")
 	viper.Set("embedder.onnx.use_query_instruction", true)
@@ -160,6 +161,7 @@ func initRuntime(ctx context.Context) (*RuntimeComponents, error) {
 		embConfig.CustomOptions = map[string]interface{}{
 			"model_path":            viper.GetString("embedder.onnx.model_path"),
 			"tokenizer_path":        viper.GetString("embedder.onnx.tokenizer_path"),
+			"model_precision":       viper.GetString("embedder.onnx.model_precision"),
 			"max_seq_len":           viper.GetInt("embedder.onnx.max_seq_len"),
 			"query_task":            viper.GetString("embedder.onnx.query_task"),
 			"use_query_instruction": viper.GetBool("embedder.onnx.use_query_instruction"),

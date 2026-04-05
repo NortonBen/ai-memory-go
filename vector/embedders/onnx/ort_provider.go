@@ -23,6 +23,9 @@
 //	ORT_PROVIDER=auto     # auto-detect (default)
 //
 // Individual configs can also set ExecProvider / execProvider fields directly.
+//
+// Weight layout (FP32/INT8) is orthogonal: see package onnxmodel and
+// ORT_EMBED_PRECISION / ORT_MODEL_PRECISION / YAML model_precision.
 package onnx
 
 import (

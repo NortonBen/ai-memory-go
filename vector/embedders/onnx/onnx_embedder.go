@@ -31,6 +31,7 @@
 //	    model_path: /path/to/model.onnx
 //	    tokenizer_path: /path/to/tokenizer.json
 //	    max_seq_len: 512
+//	    model_precision: auto   # auto | fp32 | int8 (see onnxmodel)
 //	    query_task: "Retrieve semantically similar text"
 //	    use_query_instruction: true
 package onnx
@@ -45,6 +46,7 @@ import (
 
 	ort "github.com/yalue/onnxruntime_go"
 
+	"github.com/NortonBen/ai-memory-go/onnxmodel"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -84,6 +86,10 @@ func init() {
 			useQueryInst = v
 		}
 
+		modelPrecision, _ := cfg["model_precision"].(string)
+		if modelPrecision != "" {
+			return NewHarrierEmbedderWithPrecision(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst, modelPrecision)
+		}
 		return NewHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst)
 	})
 }
@@ -100,9 +106,10 @@ type HarrierEmbedder struct {
 	useQueryInst  bool
 	execProvider  string // "cpu", "coreml", "cuda", "auto"
 
-	tokenizer    *Tokenizer
-	session      *ort.AdvancedSession
+	tokenizer      *Tokenizer
+	session        *ort.AdvancedSession
 	activeProvider string // actual provider used (set after loadSession)
+	modelPrecision string // fp32, int8 (after ResolveModel)
 
 	mu sync.Mutex
 }
@@ -110,20 +117,43 @@ type HarrierEmbedder struct {
 // NewHarrierEmbedder loads the ONNX model and tokenizer from disk.
 // It initialises the ONNX Runtime environment on first call.
 //
-// Execution provider is resolved from (highest to lowest priority):
-//  1. ORT_PROVIDER env var ("cpu", "coreml", "cuda", "auto")
-//  2. Default: "auto" (CoreML on macOS, CUDA on Linux, CPU fallback)
+// Weight layout (FP32 / INT8) is selected by onnxmodel.ResolveModel — see package onnxmodel
+// (ORT_EMBED_PRECISION, ORT_MODEL_PRECISION, or YAML model_precision). "auto" prefers smaller on-disk models.
+//
+// Execution provider: ORT_EMBED_PROVIDER, ORT_PROVIDER, default cpu — see ort_provider.go.
 //
 // Set ORT_LIB_PATH to override the ONNX Runtime shared library path.
 func NewHarrierEmbedder(modelPath, tokenizerPath string, maxSeqLen int, queryTask string, useQueryInst bool) (*HarrierEmbedder, error) {
-	if _, err := os.Stat(modelPath); err != nil {
-		return nil, fmt.Errorf("onnx harrier: model file not found at %q: %w", modelPath, err)
+	return newHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst, "")
+}
+
+// NewHarrierEmbedderWithPrecision is like NewHarrierEmbedder but forces model_precision (fp32|int8|auto),
+// overriding ORT_* env vars for this instance.
+func NewHarrierEmbedderWithPrecision(modelPath, tokenizerPath string, maxSeqLen int, queryTask string, useQueryInst bool, modelPrecision string) (*HarrierEmbedder, error) {
+	return newHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst, modelPrecision)
+}
+
+func newHarrierEmbedder(modelPath, tokenizerPath string, maxSeqLen int, queryTask string, useQueryInst bool, modelPrecision string) (*HarrierEmbedder, error) {
+	prec, err := onnxmodel.EffectivePrecision(modelPrecision, "embed")
+	if err != nil {
+		return nil, fmt.Errorf("onnx harrier: model precision: %w", err)
 	}
-	if _, err := os.Stat(tokenizerPath); err != nil {
-		return nil, fmt.Errorf("onnx harrier: tokenizer file not found at %q: %w", tokenizerPath, err)
+	resolvedModel, usedPrec, err := onnxmodel.ResolveModel(modelPath, prec)
+	if err != nil {
+		return nil, fmt.Errorf("onnx harrier: resolve model: %w", err)
+	}
+	tokPath, err := onnxmodel.ResolveSiblingFile(tokenizerPath, resolvedModel)
+	if err != nil {
+		return nil, fmt.Errorf("onnx harrier: resolve tokenizer: %w", err)
+	}
+	if _, err := os.Stat(resolvedModel); err != nil {
+		return nil, fmt.Errorf("onnx harrier: model file not found at %q: %w", resolvedModel, err)
+	}
+	if _, err := os.Stat(tokPath); err != nil {
+		return nil, fmt.Errorf("onnx harrier: tokenizer file not found at %q: %w", tokPath, err)
 	}
 
-	tok, err := NewTokenizerFromFile(tokenizerPath)
+	tok, err := NewTokenizerFromFile(tokPath)
 	if err != nil {
 		return nil, fmt.Errorf("onnx harrier: load tokenizer: %w", err)
 	}
@@ -169,13 +199,14 @@ func NewHarrierEmbedder(modelPath, tokenizerPath string, maxSeqLen int, queryTas
 	}
 
 	e := &HarrierEmbedder{
-		modelPath:     modelPath,
-		tokenizerPath: tokenizerPath,
-		maxSeqLen:     maxSeqLen,
-		queryTask:     queryTask,
-		useQueryInst:  useQueryInst,
-		execProvider:  resolveProvider(""),
-		tokenizer:     tok,
+		modelPath:      resolvedModel,
+		tokenizerPath:  tokPath,
+		maxSeqLen:      maxSeqLen,
+		queryTask:      queryTask,
+		useQueryInst:   useQueryInst,
+		execProvider:   resolveProvider(""),
+		tokenizer:      tok,
+		modelPrecision: string(usedPrec),
 	}
 
 	if err := e.loadSession(); err != nil {
@@ -283,6 +314,9 @@ func (e *HarrierEmbedder) GetModel() string { return modelName }
 
 // GetExecutionProvider returns the active ORT execution provider (e.g. "coreml", "cuda", "cpu").
 func (e *HarrierEmbedder) GetExecutionProvider() string { return e.activeProvider }
+
+// GetModelPrecision returns the resolved ONNX weight layout: fp32 or int8.
+func (e *HarrierEmbedder) GetModelPrecision() string { return e.modelPrecision }
 
 // Health implements vector.EmbeddingProvider.
 func (e *HarrierEmbedder) Health(ctx context.Context) error {

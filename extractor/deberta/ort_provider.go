@@ -20,6 +20,9 @@ import (
 //  3. ORT_PROVIDER env      (but CoreML/auto are downgraded to "cpu" — see note)
 //  4. Default: "cpu"
 //
+// ONNX weight layout (FP32/INT8) is separate: ORT_NER_PRECISION,
+// ORT_MODEL_PRECISION, or Config.ModelPrecision — see package onnxmodel.
+//
 // Why "cpu" by default?
 // DeBERTa-v3-large with CoreML compiles a ~4-6 GB GPU buffer, raising
 // process RSS to 10+ GB. CPU inference is fast enough for NER

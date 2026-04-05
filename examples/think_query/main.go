@@ -140,13 +140,8 @@ func main() {
 	_, filename, _, _ := goruntime.Caller(0)
 	root := filepath.Join(filepath.Dir(filename), "..", "..")
 
-	// Ưu tiên Harrier INT8 quantized (~280 MB) thay vì FP32 (~1 GB).
-	harrierDir := filepath.Join(root, "data", "harrier-q")
-	if _, err := os.Stat(filepath.Join(harrierDir, "model.onnx")); err != nil {
-		harrierDir = filepath.Join(root, "data", "harrier")
-	}
-	harrierModel := filepath.Join(harrierDir, "model.onnx")
-	harrierTok := filepath.Join(harrierDir, "tokenizer.json")
+	harrierModel := filepath.Join(root, "data", "harrier", "model.onnx")
+	harrierTok := filepath.Join(root, "data", "harrier", "tokenizer.json")
 	// Ưu tiên model nhỏ nhất: base > large-INT8 > large-FP32
 	debertaDir := filepath.Join(root, "data", "deberta-ner-base")
 	if _, err := os.Stat(filepath.Join(debertaDir, "model.onnx")); err != nil {

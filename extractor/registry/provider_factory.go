@@ -1,9 +1,9 @@
 package registry
 
 import (
-	ext "github.com/NortonBen/ai-memory-go/extractor"
 	"context"
 	"fmt"
+	ext "github.com/NortonBen/ai-memory-go/extractor"
 	"math/rand"
 	"slices"
 	"strings"
@@ -13,12 +13,12 @@ import (
 	"github.com/NortonBen/ai-memory-go/schema"
 
 	// LLM Providers
-	llmopenai "github.com/NortonBen/ai-memory-go/extractor/providers/llm/openai"
 	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/anthropic"
-	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/gemini"
 	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/deepseek"
-	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/ollama"
+	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/gemini"
 	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/lmstudio"
+	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/ollama"
+	llmopenai "github.com/NortonBen/ai-memory-go/extractor/providers/llm/openai"
 	"github.com/NortonBen/ai-memory-go/extractor/providers/llm/openrouter"
 
 	// Embedding Providers
@@ -311,7 +311,6 @@ func (f *DefaultProviderFactory) createOpenRouterProvider(config *ext.ProviderCo
 	}
 	return provider, nil
 }
-
 
 // DefaultEmbeddingProviderFactory implements the ext.EmbeddingProviderFactory interface
 type DefaultEmbeddingProviderFactory struct {
@@ -609,6 +608,7 @@ func (f *DefaultEmbeddingProviderFactory) createLMStudioEmbeddingProvider(config
 //   - max_seq_len     (int, optional): sequence length cap, default 512
 //   - query_task      (string, optional): instruction prefix task description
 //   - use_query_instruction (bool, optional): prepend instruction for queries
+//   - model_precision   (string, optional): fp32 | int8 | auto (see onnxmodel package)
 func (f *DefaultEmbeddingProviderFactory) createONNXEmbeddingProvider(config *ext.EmbeddingProviderConfig) (ext.EmbeddingProvider, error) {
 	if config.CustomOptions == nil {
 		return nil, fmt.Errorf("onnx provider requires custom_options with model_path and tokenizer_path")
@@ -630,7 +630,14 @@ func (f *DefaultEmbeddingProviderFactory) createONNXEmbeddingProvider(config *ex
 		useQueryInst = v
 	}
 
-	harrier, err := embonnx.NewHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst)
+	modelPrecision, _ := config.CustomOptions["model_precision"].(string)
+	var harrier *embonnx.HarrierEmbedder
+	var err error
+	if modelPrecision != "" {
+		harrier, err = embonnx.NewHarrierEmbedderWithPrecision(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst, modelPrecision)
+	} else {
+		harrier, err = embonnx.NewHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ONNX Harrier embedding provider: %w", err)
 	}
@@ -1188,10 +1195,10 @@ func (s *onnxEmbeddingProviderShim) GetCapabilities() *ext.EmbeddingProviderCapa
 	caps := ext.GetEmbeddingProviderCapabilitiesMap()[ext.EmbeddingProviderONNX]
 	if caps == nil {
 		return &ext.EmbeddingProviderCapabilities{
-			SupportsBatching:   true,
-			DefaultDimension:   640,
-			MaxBatchSize:       32,
-			MaxTokensPerText:   8192,
+			SupportsBatching: true,
+			DefaultDimension: 640,
+			MaxBatchSize:     32,
+			MaxTokensPerText: 8192,
 		}
 	}
 	return caps

@@ -68,14 +68,9 @@ func main() {
 	_, filename, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(filename), "..", "..")
 
-	// Ưu tiên Harrier INT8 quantized (~280 MB) thay vì FP32 (~1 GB).
-	// Quantize: python -c "from onnxruntime.quantization import quantize_dynamic,QuantType; quantize_dynamic('data/harrier/model.onnx','data/harrier-q/model.onnx',weight_type=QuantType.QInt8)"
-	harrierDir := filepath.Join(root, "data", "harrier-q")
-	if _, err := os.Stat(filepath.Join(harrierDir, "model.onnx")); err != nil {
-		harrierDir = filepath.Join(root, "data", "harrier") // fallback FP32
-	}
-	harrierModel := filepath.Join(harrierDir, "model.onnx")
-	harrierTok := filepath.Join(harrierDir, "tokenizer.json")
+	// onnxmodel.ResolveModel (auto) chọn harrier-q (INT8) nếu có, không thì FP32.
+	harrierModel := filepath.Join(root, "data", "harrier", "model.onnx")
+	harrierTok := filepath.Join(root, "data", "harrier", "tokenizer.json")
 
 	// Ưu tiên model nhỏ nhất theo thứ tự: base > large-INT8 > large-FP32
 	// base:     ~400 MB  (make export-deberta-base)
@@ -116,6 +111,7 @@ func main() {
 	fmt.Printf("    Mô hình  : %s\n", harrierEmb.GetModel())
 	fmt.Printf("    Chiều    : %d\n", harrierEmb.GetDimensions())
 	fmt.Printf("    Provider : %s\n", harrierEmb.GetExecutionProvider())
+	fmt.Printf("    Trọng số : %s  (fp32|int8 — ORT_EMBED_PRECISION / auto)\n", harrierEmb.GetModelPrecision())
 	if err := harrierEmb.Health(ctx); err != nil {
 		log.Fatalf("FATAL Harrier health check: %v", err)
 	}
@@ -136,6 +132,7 @@ func main() {
 	fmt.Println("    Mô hình   : Gladiator/microsoft-deberta-v3-large_ner_conll2003")
 	fmt.Println("    Nhãn      : O B/I-PER B/I-ORG B/I-LOC B/I-MISC")
 	fmt.Printf("    Provider  : %s\n", debExt.GetExecutionProvider())
+	fmt.Printf("    Trọng số  : %s  (ORT_NER_PRECISION / auto)\n", debExt.GetModelPrecision())
 	fmt.Println("    Trạng thái: OK ✓")
 
 	// Thử nghiệm nhanh NER
@@ -187,7 +184,7 @@ func main() {
 	fmt.Println("    ORT_EMBED_PROVIDER=coreml  : ~4 GB  — Harrier dùng GPU")
 	fmt.Println("    ORT_NER_PROVIDER=coreml    : ~6 GB  — DeBERTa dùng GPU")
 	fmt.Println("    base model (--size base)   : 4x nhỏ hơn — export lại")
-
+	fmt.Println("    ORT_MODEL_PRECISION=fp32   : ép FP32 (bỏ qua thư mục -q)")
 	// ─── 5. ADD corpus tiếng Việt ─────────────────────────────────────────────
 	section("[5] ADD — nạp kho tri thức tiếng Việt")
 	sessionID := "offline-graph-vi"

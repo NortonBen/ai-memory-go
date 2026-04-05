@@ -13,12 +13,9 @@
 //
 // # GPU / Execution providers
 //
-// Control via the ORT_PROVIDER environment variable or Config.ExecProvider:
-//
-//	ORT_PROVIDER=coreml   Apple Silicon GPU + Neural Engine (macOS default)
-//	ORT_PROVIDER=cuda     NVIDIA GPU (Linux/Windows)
-//	ORT_PROVIDER=cpu      Force CPU only
-//	ORT_PROVIDER=auto     Auto-detect (default)
+// Control execution provider via ORT_NER_PROVIDER / ORT_PROVIDER or Config.ExecProvider.
+// Model precision (separate from EP): ORT_NER_PRECISION / ORT_MODEL_PRECISION / Config.ModelPrecision
+// (auto | fp32 | int8). See package onnxmodel for directory layout.
 //
 // # Setup
 //
@@ -56,6 +53,7 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/onnxmodel"
 	"github.com/NortonBen/ai-memory-go/schema"
 )
 
@@ -82,6 +80,9 @@ type Config struct {
 	// OrtLibPath overrides the ONNX Runtime shared library path.
 	// If empty, standard paths are searched or ORT_LIB_PATH env is used.
 	OrtLibPath string
+
+	// ModelPrecision selects ONNX weights: auto, fp32, int8 (empty = ORT_NER_PRECISION / ORT_MODEL_PRECISION).
+	ModelPrecision string
 }
 
 // ─── IOB entity span ──────────────────────────────────────────────────────────
@@ -101,14 +102,15 @@ type Extractor struct {
 	tokenizer      *Tokenizer
 	labels         []string // label index → IOB string (e.g. "B-PER")
 	activeProvider string   // actual ORT provider used
+	modelPrecision string   // fp32, int8 after ResolveModel
 
 	// Persistent session and tensors (guarded by mu)
-	session     *ort.AdvancedSession
-	inputIDs    *ort.Tensor[int64]
-	attnMask    *ort.Tensor[int64]
-	typeIDs     *ort.Tensor[int64] // nil if model doesn't need token_type_ids
+	session      *ort.AdvancedSession
+	inputIDs     *ort.Tensor[int64]
+	attnMask     *ort.Tensor[int64]
+	typeIDs      *ort.Tensor[int64] // nil if model doesn't need token_type_ids
 	logitsTensor *ort.Tensor[float32]
-	mu          sync.Mutex
+	mu           sync.Mutex
 }
 
 var ortOnce sync.Once
@@ -117,6 +119,25 @@ var ortOnce sync.Once
 func NewExtractor(cfg Config) (*Extractor, error) {
 	if cfg.MaxSeqLen <= 0 {
 		cfg.MaxSeqLen = 512
+	}
+
+	prec, err := onnxmodel.EffectivePrecision(cfg.ModelPrecision, "ner")
+	if err != nil {
+		return nil, fmt.Errorf("deberta: model precision: %w", err)
+	}
+	resolvedModel, usedPrec, err := onnxmodel.ResolveModel(cfg.ModelPath, prec)
+	if err != nil {
+		return nil, fmt.Errorf("deberta: resolve model: %w", err)
+	}
+	cfg.ModelPath = resolvedModel
+
+	cfg.TokenizerPath, err = onnxmodel.ResolveSiblingFile(cfg.TokenizerPath, resolvedModel)
+	if err != nil {
+		return nil, fmt.Errorf("deberta: resolve tokenizer: %w", err)
+	}
+	cfg.LabelsPath, err = onnxmodel.ResolveSiblingFile(cfg.LabelsPath, resolvedModel)
+	if err != nil {
+		return nil, fmt.Errorf("deberta: resolve labels: %w", err)
 	}
 
 	tok, err := NewTokenizerFromFile(cfg.TokenizerPath)
@@ -181,9 +202,10 @@ func NewExtractor(cfg Config) (*Extractor, error) {
 	}
 
 	e := &Extractor{
-		cfg:       cfg,
-		tokenizer: tok,
-		labels:    labels,
+		cfg:            cfg,
+		tokenizer:      tok,
+		labels:         labels,
+		modelPrecision: string(usedPrec),
 	}
 
 	if err := e.loadSession(); err != nil {
@@ -310,6 +332,9 @@ func (e *Extractor) Close() {
 
 // GetExecutionProvider returns the active ORT execution provider (e.g. "coreml", "cuda", "cpu").
 func (e *Extractor) GetExecutionProvider() string { return e.activeProvider }
+
+// GetModelPrecision returns the resolved ONNX weight layout (fp32, int8).
+func (e *Extractor) GetModelPrecision() string { return e.modelPrecision }
 
 // ─── extractor.LLMExtractor interface ─────────────────────────────────────────
 
