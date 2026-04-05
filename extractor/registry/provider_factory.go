@@ -23,6 +23,7 @@ import (
 
 	// Embedding Providers
 	embopenai "github.com/NortonBen/ai-memory-go/extractor/providers/embedding/openai"
+	embonnx "github.com/NortonBen/ai-memory-go/vector/embedders/onnx"
 )
 
 // DefaultProviderFactory implements the ext.ProviderFactory interface
@@ -339,6 +340,7 @@ func NewEmbeddingProviderFactory() ext.EmbeddingProviderFactory {
 			ext.EmbeddingProviderLMStudio,
 			ext.EmbeddingProviderOpenRouter,
 			ext.EmbeddingProviderCustom,
+			ext.EmbeddingProviderONNX,
 		},
 	}
 	return factory
@@ -401,6 +403,8 @@ func (f *DefaultEmbeddingProviderFactory) CreateProvider(config *ext.EmbeddingPr
 		return f.createLMStudioEmbeddingProvider(config)
 	case ext.EmbeddingProviderOpenRouter:
 		return f.createOpenRouterEmbeddingProvider(config)
+	case ext.EmbeddingProviderONNX:
+		return f.createONNXEmbeddingProvider(config)
 	default:
 		return nil, ext.NewExtractorError("unsupported", fmt.Sprintf("unsupported embedding provider type: %s", config.Type), 400)
 	}
@@ -596,6 +600,46 @@ func (f *DefaultEmbeddingProviderFactory) createLMStudioEmbeddingProvider(config
 		return nil, fmt.Errorf("failed to create LM Studio embedding provider: %w", err)
 	}
 	return provider, nil
+}
+
+// createONNXEmbeddingProvider creates a local ONNX embedding provider for Harrier-OSS-v1-270m.
+// Required CustomOptions keys:
+//   - model_path      (string): path to the exported model.onnx file
+//   - tokenizer_path  (string): path to tokenizer.json
+//   - max_seq_len     (int, optional): sequence length cap, default 512
+//   - query_task      (string, optional): instruction prefix task description
+//   - use_query_instruction (bool, optional): prepend instruction for queries
+func (f *DefaultEmbeddingProviderFactory) createONNXEmbeddingProvider(config *ext.EmbeddingProviderConfig) (ext.EmbeddingProvider, error) {
+	if config.CustomOptions == nil {
+		return nil, fmt.Errorf("onnx provider requires custom_options with model_path and tokenizer_path")
+	}
+
+	modelPath, _ := config.CustomOptions["model_path"].(string)
+	tokenizerPath, _ := config.CustomOptions["tokenizer_path"].(string)
+	if modelPath == "" {
+		return nil, fmt.Errorf("onnx provider: model_path is required in custom_options")
+	}
+	if tokenizerPath == "" {
+		return nil, fmt.Errorf("onnx provider: tokenizer_path is required in custom_options")
+	}
+
+	maxSeqLen, _ := config.CustomOptions["max_seq_len"].(int)
+	queryTask, _ := config.CustomOptions["query_task"].(string)
+	useQueryInst := true
+	if v, ok := config.CustomOptions["use_query_instruction"].(bool); ok {
+		useQueryInst = v
+	}
+
+	harrier, err := embonnx.NewHarrierEmbedder(modelPath, tokenizerPath, maxSeqLen, queryTask, useQueryInst)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ONNX Harrier embedding provider: %w", err)
+	}
+
+	return &onnxEmbeddingProviderShim{
+		HarrierEmbedder: harrier,
+		config:          config,
+		metrics:         &ext.EmbeddingProviderMetrics{FirstRequest: time.Now()},
+	}, nil
 }
 
 // Helper functions for creating configured mock providers
@@ -1034,3 +1078,127 @@ func (p *ConfiguredMockEmbeddingProvider) SetCustomDimensions(dimensions int) er
 func (p *ConfiguredMockEmbeddingProvider) SupportsCustomDimensions() bool {
 	return true // Mock provider supports custom dimensions
 }
+
+// onnxEmbeddingProviderShim wraps HarrierEmbedder to satisfy the full
+// extractor.EmbeddingProvider interface expected by the registry/factory.
+type onnxEmbeddingProviderShim struct {
+	*embonnx.HarrierEmbedder
+	config  *ext.EmbeddingProviderConfig
+	metrics *ext.EmbeddingProviderMetrics
+	mu      sync.RWMutex
+}
+
+func (s *onnxEmbeddingProviderShim) GenerateEmbeddingWithOptions(ctx context.Context, text string, opts *ext.EmbeddingOptions) ([]float32, error) {
+	if opts != nil && opts.CustomOptions != nil {
+		if isQuery, ok := opts.CustomOptions["is_query"].(bool); ok && isQuery {
+			return s.HarrierEmbedder.GenerateQueryEmbedding(ctx, text)
+		}
+	}
+	return s.HarrierEmbedder.GenerateEmbedding(ctx, text)
+}
+
+func (s *onnxEmbeddingProviderShim) GenerateBatchEmbeddingsWithOptions(ctx context.Context, texts []string, opts *ext.EmbeddingOptions) ([][]float32, error) {
+	return s.HarrierEmbedder.GenerateBatchEmbeddings(ctx, texts)
+}
+
+func (s *onnxEmbeddingProviderShim) SetModel(model string) error {
+	return fmt.Errorf("onnx harrier: changing model at runtime is not supported")
+}
+
+func (s *onnxEmbeddingProviderShim) GetProviderType() ext.EmbeddingProviderType {
+	return ext.EmbeddingProviderONNX
+}
+
+func (s *onnxEmbeddingProviderShim) GetSupportedModels() []string {
+	return []string{embonnx.HarrierModelName}
+}
+
+func (s *onnxEmbeddingProviderShim) GetMaxBatchSize() int { return 32 }
+
+func (s *onnxEmbeddingProviderShim) GetMaxTokensPerText() int { return 8192 }
+
+func (s *onnxEmbeddingProviderShim) GenerateEmbeddingCached(ctx context.Context, text string, ttl time.Duration) ([]float32, error) {
+	return s.HarrierEmbedder.GenerateEmbedding(ctx, text)
+}
+
+func (s *onnxEmbeddingProviderShim) GenerateBatchEmbeddingsCached(ctx context.Context, texts []string, ttl time.Duration) ([][]float32, error) {
+	return s.HarrierEmbedder.GenerateBatchEmbeddings(ctx, texts)
+}
+
+func (s *onnxEmbeddingProviderShim) DeduplicateAndEmbed(ctx context.Context, texts []string) (map[string][]float32, error) {
+	seen := make(map[string]bool)
+	result := make(map[string][]float32)
+	for _, t := range texts {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		emb, err := s.HarrierEmbedder.GenerateEmbedding(ctx, t)
+		if err != nil {
+			return nil, err
+		}
+		result[t] = emb
+	}
+	return result, nil
+}
+
+func (s *onnxEmbeddingProviderShim) GetTokenCount(text string) (int, error) {
+	return len([]rune(text)) / 4, nil
+}
+
+func (s *onnxEmbeddingProviderShim) EstimateCost(_ int) (float64, error) {
+	return 0.0, nil
+}
+
+func (s *onnxEmbeddingProviderShim) GetUsage(_ context.Context) (*ext.EmbeddingUsageStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return &ext.EmbeddingUsageStats{TotalRequests: s.metrics.TotalRequests}, nil
+}
+
+func (s *onnxEmbeddingProviderShim) GetRateLimit(_ context.Context) (*ext.EmbeddingRateLimitStatus, error) {
+	return &ext.EmbeddingRateLimitStatus{RequestsRemaining: 1000000, RequestsPerMinute: 1000000}, nil
+}
+
+func (s *onnxEmbeddingProviderShim) Configure(cfg *ext.EmbeddingProviderConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config = cfg
+	return nil
+}
+
+func (s *onnxEmbeddingProviderShim) GetConfiguration() *ext.EmbeddingProviderConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cp := *s.config
+	return &cp
+}
+
+func (s *onnxEmbeddingProviderShim) ValidateConfiguration(cfg *ext.EmbeddingProviderConfig) error {
+	return ext.ValidateEmbeddingProviderConfig(cfg)
+}
+
+func (s *onnxEmbeddingProviderShim) SupportsStreaming() bool { return false }
+
+func (s *onnxEmbeddingProviderShim) GenerateStreamingEmbedding(_ context.Context, _ string, _ ext.EmbeddingStreamCallback) error {
+	return ext.NewExtractorError("unsupported", "streaming not supported by ONNX provider", 501)
+}
+
+func (s *onnxEmbeddingProviderShim) GetCapabilities() *ext.EmbeddingProviderCapabilities {
+	caps := ext.GetEmbeddingProviderCapabilitiesMap()[ext.EmbeddingProviderONNX]
+	if caps == nil {
+		return &ext.EmbeddingProviderCapabilities{
+			SupportsBatching:   true,
+			DefaultDimension:   640,
+			MaxBatchSize:       32,
+			MaxTokensPerText:   8192,
+		}
+	}
+	return caps
+}
+
+func (s *onnxEmbeddingProviderShim) SetCustomDimensions(_ int) error {
+	return ext.NewExtractorError("unsupported", "ONNX Harrier has fixed embedding dimension 640", 400)
+}
+
+func (s *onnxEmbeddingProviderShim) SupportsCustomDimensions() bool { return false }

@@ -14,3 +14,4 @@ parser/cache/.tmp
 parser/formats/test_chunks_truy.txt
 parser/formats/truy_overlap_report.txt
 search.log
+.venv/

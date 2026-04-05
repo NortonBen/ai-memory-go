@@ -15,6 +15,7 @@ import (
 	_ "github.com/NortonBen/ai-memory-go/storage/adapters/postgresql"
 	_ "github.com/NortonBen/ai-memory-go/storage/adapters/sqlite"
 	"github.com/NortonBen/ai-memory-go/vector"
+	_ "github.com/NortonBen/ai-memory-go/vector/embedders/onnx" // registers "onnx" EmbeddingProvider
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -106,6 +107,13 @@ func createDefaultConfig() {
 	viper.Set("embedder.dimensions", 768)
 	viper.Set("embedder.api_key", "")
 
+	// ONNX / Harrier-OSS-v1-270m local embedding (set embedder.provider: onnx to activate)
+	viper.Set("embedder.onnx.model_path", "")
+	viper.Set("embedder.onnx.tokenizer_path", "")
+	viper.Set("embedder.onnx.max_seq_len", 512)
+	viper.Set("embedder.onnx.query_task", "Retrieve semantically similar text")
+	viper.Set("embedder.onnx.use_query_instruction", true)
+
 	err = viper.SafeWriteConfigAs(configPath)
 	cobra.CheckErr(err)
 
@@ -145,6 +153,18 @@ func initRuntime(ctx context.Context) (*RuntimeComponents, error) {
 		Model:      embModel,
 		APIKey:     embApiKey,
 		Dimensions: embDim,
+	}
+
+	// For the ONNX/Harrier provider, pass model_path and tokenizer_path via CustomOptions.
+	if extractor.EmbeddingProviderType(embProviderStr) == extractor.EmbeddingProviderONNX {
+		embConfig.CustomOptions = map[string]interface{}{
+			"model_path":            viper.GetString("embedder.onnx.model_path"),
+			"tokenizer_path":        viper.GetString("embedder.onnx.tokenizer_path"),
+			"max_seq_len":           viper.GetInt("embedder.onnx.max_seq_len"),
+			"query_task":            viper.GetString("embedder.onnx.query_task"),
+			"use_query_instruction": viper.GetBool("embedder.onnx.use_query_instruction"),
+		}
+		embConfig.Dimensions = 640
 	}
 	baseEmbedder, err := embFactory.CreateProvider(embConfig)
 	if err != nil {

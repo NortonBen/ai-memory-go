@@ -96,3 +96,9 @@ update:
 	@echo "Updating dependencies..."
 	go get -u ./...
 	go mod tidy
+
+build-harrier-onnx:
+	source .venv/bin/activate && HF_HOME="$(pwd)/data/hf_cache" TRANSFORMERS_CACHE="$(pwd)/data/hf_cache" python3 scripts/export_harrier_onnx.py \
+		--model microsoft/harrier-oss-v1-270m \
+		--output data/harrier \
+		--seq-len 512 2>&1

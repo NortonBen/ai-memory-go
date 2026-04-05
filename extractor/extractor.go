@@ -313,6 +313,9 @@ const (
 	EmbeddingProviderLMStudio          EmbeddingProviderType = "lmstudio"
 	EmbeddingProviderOpenRouter        EmbeddingProviderType = "openrouter"
 	EmbeddingProviderCustom            EmbeddingProviderType = "custom"
+	// EmbeddingProviderONNX runs a local ONNX model via github.com/owulveryck/onnx-go.
+	// Supports Harrier-OSS-v1-270m (dim=640) and compatible ONNX embedding models.
+	EmbeddingProviderONNX              EmbeddingProviderType = "onnx"
 )
 
 // EmbeddingOptions configures embedding generation behavior
@@ -543,6 +546,16 @@ func DefaultEmbeddingProviderConfig(providerType EmbeddingProviderType) *Embeddi
 		config.Dimensions = 1536
 		config.MaxBatchSize = 1
 		config.Features.EnableUsageTracking = true
+
+	case EmbeddingProviderONNX:
+		config.Model = "microsoft/harrier-oss-v1-270m"
+		config.Dimensions = 640
+		config.MaxTokensPerText = 8192
+		config.MaxBatchSize = 32
+		config.SupportedModels = []string{"microsoft/harrier-oss-v1-270m"}
+		config.Features.EnableBatching = true
+		config.Features.EnableCaching = true
+		config.Features.EnableDeduplication = true
 	}
 
 	// Set default rate limiting
@@ -732,6 +745,16 @@ func ValidateEmbeddingProviderConfig(config *EmbeddingProviderConfig) error {
 				}
 			}
 		}
+
+	case EmbeddingProviderONNX:
+		// ONNX provider requires model_path and tokenizer_path via CustomOptions
+		if config.CustomOptions != nil {
+			if modelPath, exists := config.CustomOptions["model_path"]; exists {
+				if modelPath == "" {
+					return NewExtractorError("validation", "onnx provider model_path cannot be empty", 400)
+				}
+			}
+		}
 	}
 
 	// Validate dimensions
@@ -871,6 +894,28 @@ func GetEmbeddingProviderCapabilitiesMap() map[EmbeddingProviderType]*EmbeddingP
 			CostPerToken:          0.0, // Free tier
 			RateLimitRPM:          1500,
 			RateLimitTPM:          1000000,
+		},
+		// EmbeddingProviderONNX: local ONNX inference via github.com/owulveryck/onnx-go.
+		// Primary target: microsoft/harrier-oss-v1-270m (dim=640, multilingual, MIT).
+		EmbeddingProviderONNX: {
+			SupportsBatching:      true,
+			SupportsStreaming:     false,
+			SupportsCustomDims:    false,
+			SupportsNormalization: true,
+			MaxTokensPerText:      8192,
+			MaxBatchSize:          32,
+			SupportedModels:       []string{"microsoft/harrier-oss-v1-270m"},
+			DefaultModel:          "microsoft/harrier-oss-v1-270m",
+			SupportedDimensions:   []int{640},
+			DefaultDimension:      640,
+			SupportsRateLimiting:  false,
+			SupportsUsageTracking: false,
+			SupportsCaching:       true,
+			SupportsDeduplication: true,
+			SupportedInputTypes:   []string{"text"},
+			SupportsFineTuning:    false,
+			SupportsCustomModels:  true,
+			CostPerToken:          0.0, // fully local, no API cost
 		},
 	}
 }
