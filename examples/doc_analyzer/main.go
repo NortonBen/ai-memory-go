@@ -47,7 +47,7 @@ var document = struct {
 	sections: []struct{ heading, text string }{
 		{
 			"Làn sóng đầu tư AI toàn cầu",
-			"Các tập đoàn công nghệ lớn như Microsoft, Google và NVIDIA đang đầu tư hàng chục tỷ USD vào nghiên cứu và hạ tầng AI. Satya Nadella, CEO của Microsoft, tuyên bố công ty sẽ rót 80 tỷ USD vào trung tâm dữ liệu AI trong năm 2025. Sam Altman từ OpenAI đang đàm phán khoản đầu tư 500 tỷ USD cho dự án Stargate tại Mỹ. Jensen Huang, CEO của NVIDIA, khẳng định chip GPU Blackwell thế hệ mới sẽ tăng tốc quá trình huấn luyện lên 30 lần.",
+			"	",
 		},
 		{
 			"Việt Nam gia nhập cuộc đua AI",

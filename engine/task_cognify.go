@@ -23,12 +23,9 @@ type CognifyTask struct {
 	ConsistencyThreshold float32
 }
 
-const (
-	// maxChunkDispatchPerSplit controls how many child chunk tasks are dispatched
-	// immediately after a parent split. Remaining chunks stay pending and will be
-	// picked up by the next Cognify sweep, preventing burst overload.
-	maxChunkDispatchPerSplit = 64
-)
+// Parent split từng giới hạn trySubmit 64 task trong worker đang chạy — phần còn lại
+// không được ai submit nên kẹt ở pending (vd. 64/511). Toàn bộ chunk con được
+// nối vào queue qua goroutine + Submit (xem Execute).
 
 // Execute performs the extraction and embedding logic for CognifyTask.
 func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, emb vector.EmbeddingProvider, store storage.Storage, graphStore graph.GraphStore, vectorStore vector.VectorStore, wp *WorkerPool) error {
@@ -100,31 +97,21 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 		// If worker pool is available, enqueue child chunks best-effort.
 		// IMPORTANT: do not block here when queue is full, otherwise large files
 		// can deadlock the parent split phase (e.g. >1000 child chunks).
-		if wp != nil {
-			dispatchCap := maxChunkDispatchPerSplit
-			if dispatchCap > len(createdChildren) {
-				dispatchCap = len(createdChildren)
-			}
-			enqueued := 0
-			for i, child := range createdChildren {
-				if i >= dispatchCap {
-					break
+		// Không Submit từ chính worker đang chạy task parent (dễ deadlock khi queue đầy).
+		// Goroutine nối lần lượt từng CognifyTask — Submit block khi buffer đầy cho tới khi worker khác xử lý.
+		if wp != nil && len(createdChildren) > 0 {
+			children := append([]*schema.DataPoint(nil), createdChildren...)
+			th := t.ConsistencyThreshold
+			pid := t.DataPoint.ID
+			log.Printf("Task %s: queueing %d chunk cognify tasks asynchronously", pid, len(children))
+			go func() {
+				for _, child := range children {
+					wp.Submit(&CognifyTask{
+						DataPoint:            child,
+						ConsistencyThreshold: th,
+					})
 				}
-				if trySubmitTask(wp, &CognifyTask{
-					DataPoint:            child,
-					ConsistencyThreshold: t.ConsistencyThreshold,
-				}) {
-					enqueued++
-				}
-			}
-			if enqueued < dispatchCap {
-				log.Printf("Task %s: worker queue saturated, enqueued %d/%d dispatch-cap children; remaining stay pending for sweep",
-					t.DataPoint.ID, enqueued, dispatchCap)
-			}
-			if dispatchCap < len(createdChildren) {
-				log.Printf("Task %s: dispatch cap=%d, deferred %d/%d children to pending sweep",
-					t.DataPoint.ID, dispatchCap, len(createdChildren)-dispatchCap, len(createdChildren))
-			}
+			}()
 		}
 		return nil
 	}
@@ -159,7 +146,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 	results := make([]*chunkResult, len(chunks))
 
 	// 2. Process each chunk with max ChunkConcurrency concurrent goroutines (default 4).
-	chunkConcurrency := 4
+	chunkConcurrency := 30
 	if wp != nil && wp.ChunkConcurrency > 0 {
 		chunkConcurrency = wp.ChunkConcurrency
 	}
@@ -183,6 +170,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 			// 2b. Store Chunk Embedding into VectorStore if provided
 			if vectorStore != nil {
 				chunkID := fmt.Sprintf("%s-chunk-%d", t.DataPoint.ID, i)
+				tier := schema.MemoryTierFromDataPoint(t.DataPoint)
 				if storeErr := vectorStore.StoreEmbedding(gctx, chunkID, embedding, map[string]interface{}{
 					"content_type": t.DataPoint.ContentType,
 					"session_id":   t.DataPoint.SessionID,
@@ -190,6 +178,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 					"source_id":    t.DataPoint.ID,
 					"chunk_index":  i,
 					"is_chunk":     true,
+					"memory_tier":  tier,
 				}); storeErr != nil {
 					log.Printf("failed to store chunk embedding %d in vectorStore: %v", i, storeErr)
 				}
@@ -250,11 +239,13 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 
 		// Store Document (Average) Embedding if not already stored (for root DP)
 		if vectorStore != nil && len(chunks) > 0 {
+			docTier := schema.MemoryTierFromDataPoint(t.DataPoint)
 			err = vectorStore.StoreEmbedding(ctx, t.DataPoint.ID, avgEmb, map[string]interface{}{
 				"content_type": t.DataPoint.ContentType,
 				"session_id":   t.DataPoint.SessionID,
 				"user_id":      t.DataPoint.UserID,
 				"is_document":  true,
+				"memory_tier":  docTier,
 			})
 		}
 	}
@@ -358,16 +349,4 @@ func syncParentStatusFromChildren(ctx context.Context, store storage.Storage, pa
 	}
 	parent.UpdatedAt = time.Now()
 	return store.UpdateDataPoint(ctx, parent)
-}
-
-func trySubmitTask(wp *WorkerPool, task WorkerTask) bool {
-	if wp == nil || task == nil {
-		return false
-	}
-	select {
-	case wp.taskQueue <- task:
-		return true
-	default:
-		return false
-	}
 }

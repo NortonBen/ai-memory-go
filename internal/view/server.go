@@ -68,6 +68,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(p+"/relationships", s.handleRelationships)
 	s.mux.HandleFunc(p+"/vectors", s.handleVectors)
 	s.mux.HandleFunc(p+"/search", s.handleSearch)
+	s.mux.HandleFunc(p+"/memory", s.handleMemory)
+	s.mux.HandleFunc(p+"/think", s.handleThink)
 	s.mux.HandleFunc(p+"/graph/stats", s.handleGraphStats)
 	s.mux.HandleFunc(p+"/graph/neighbors", s.handleGraphNeighbors)
 	s.mux.HandleFunc(p+"/graph/path", s.handleGraphPath)
@@ -122,6 +124,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"input": 0,
 		"chunk": 0,
 	}
+	tierSummary := map[string]int{
+		schema.MemoryTierCore:    0,
+		schema.MemoryTierGeneral: 0,
+		schema.MemoryTierData:    0,
+		schema.MemoryTierStorage: 0,
+	}
 	for _, dp := range all {
 		statusSummary[string(dp.ProcessingStatus)]++
 		if dataPointKind(dp) == "chunk" {
@@ -129,6 +137,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		} else {
 			typeSummary["input"]++
 		}
+		t := schema.MemoryTierFromDataPoint(dp)
+		tierSummary[t]++
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -138,6 +148,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"vector_count":    vecCount,
 		"status_summary":  statusSummary,
 		"type_summary":    typeSummary,
+		"tier_summary":    tierSummary,
 		"latest":          toDataPointCards(latest),
 	})
 }
@@ -170,6 +181,16 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results = filterDataPoints(results, kind, status)
+	if tier := strings.TrimSpace(r.URL.Query().Get("tier")); tier != "" {
+		want := schema.NormalizeMemoryTier(tier)
+		filtered := make([]*schema.DataPoint, 0, len(results))
+		for _, dp := range results {
+			if schema.MemoryTierFromDataPoint(dp) == want {
+				filtered = append(filtered, dp)
+			}
+		}
+		results = filtered
+	}
 
 	includeVectors := strings.EqualFold(r.URL.Query().Get("include_vectors"), "true")
 	total := len(results)
@@ -196,6 +217,7 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 			"session_id":       dp.SessionID,
 			"type":             dp.ContentType,
 			"item_type":        itemType,
+			"memory_tier":      schema.MemoryTierFromDataPoint(dp),
 			"status":           dp.ProcessingStatus,
 			"content":          dp.Content,
 			"created_at":       dp.CreatedAt,
@@ -414,6 +436,16 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results = filterDataPoints(results, kind, status)
+	if tier := strings.TrimSpace(r.URL.Query().Get("tier")); tier != "" {
+		want := schema.NormalizeMemoryTier(tier)
+		filtered := make([]*schema.DataPoint, 0, len(results))
+		for _, dp := range results {
+			if schema.MemoryTierFromDataPoint(dp) == want {
+				filtered = append(filtered, dp)
+			}
+		}
+		results = filtered
+	}
 
 	// IMPORTANT: filter by available embeddings first, then paginate.
 	// If we paginate before filtering, large batches of pending chunks can make
@@ -429,11 +461,19 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if totalAvailable >= start && totalAvailable < end {
+			vecTier := ""
+			if meta, ok := v["metadata"].(map[string]interface{}); ok && meta != nil {
+				if s, ok := meta["memory_tier"].(string); ok {
+					vecTier = s
+				}
+			}
 			items = append(items, map[string]interface{}{
-				"id":         dp.ID,
-				"session_id": dp.SessionID,
-				"content":    dp.Content,
-				"vector":     v,
+				"id":          dp.ID,
+				"session_id":  dp.SessionID,
+				"content":     dp.Content,
+				"memory_tier": schema.MemoryTierFromDataPoint(dp),
+				"vec_tier":    vecTier,
+				"vector":      v,
 			})
 		}
 		totalAvailable++
@@ -462,17 +502,170 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		sessionID = "default"
 	}
 
-	resp, err := s.deps.Engine.Search(r.Context(), &schema.SearchQuery{
+	sq := &schema.SearchQuery{
 		Text:      queryText,
 		SessionID: sessionID,
 		Limit:     limit,
-	})
+	}
+
+	if queryBool(r, "four_tier") {
+		ft := &schema.FourTierSearchOptions{
+			IncludeStorageTier: queryBool(r, "include_storage"),
+			AutoStorageIfWeak:  queryBool(r, "auto_storage"),
+		}
+		if v := strings.TrimSpace(r.URL.Query().Get("weak_threshold")); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				ft.WeakScoreThreshold = f
+			}
+		}
+		if queryBool(r, "no_core") {
+			f := false
+			ft.SearchCore = &f
+		}
+		if queryBool(r, "no_general") {
+			f := false
+			ft.SearchGeneral = &f
+		}
+		if queryBool(r, "no_data") {
+			f := false
+			ft.SearchData = &f
+		}
+		en := true
+		ft.Enabled = &en
+		sq.FourTier = ft
+	}
+
+	resp, err := s.deps.Engine.Search(r.Context(), sq)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleMemory POST JSON: thêm nội dung với memory_tier tùy chọn; có thể bật cognify bất đồng bộ.
+func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErr(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var body struct {
+		Content   string `json:"content"`
+		SessionID string `json:"session_id"`
+		Tier      string `json:"tier"`
+		Cognify   bool   `json:"cognify"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	content := strings.TrimSpace(body.Content)
+	if content == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("content is required"))
+		return
+	}
+	sessionID := strings.TrimSpace(body.SessionID)
+	if sessionID == "" {
+		sessionID = "default"
+	}
+
+	ctx := r.Context()
+	opts := []engine.AddOption{engine.WithSessionID(sessionID)}
+	if strings.TrimSpace(body.Tier) != "" {
+		opts = append(opts, engine.WithMemoryTier(body.Tier))
+	}
+	dp, err := s.deps.Engine.Add(ctx, content, opts...)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if body.Cognify {
+		_, _ = s.deps.Engine.Cognify(ctx, dp, engine.WithWaitCognify(false))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":        true,
+		"id":        dp.ID,
+		"session_id": dp.SessionID,
+		"memory_tier": schema.MemoryTierFromDataPoint(dp),
+		"cognify_queued": body.Cognify,
+	})
+}
+
+func queryBool(r *http.Request, key string) bool {
+	return strings.EqualFold(strings.TrimSpace(r.URL.Query().Get(key)), "true") ||
+		strings.TrimSpace(r.URL.Query().Get(key)) == "1"
+}
+
+// thinkRequest JSON cho POST /api/think (tách tag để client không phụ thuộc tên field Go).
+type thinkRequest struct {
+	Text               string                       `json:"text"`
+	SessionID          string                       `json:"session_id"`
+	Limit              int                          `json:"limit"`
+	HopDepth           int                          `json:"hop_depth"`
+	AnalyzeQuery       bool                         `json:"analyze_query"`
+	EnableThinking     bool                         `json:"enable_thinking"`
+	MaxThinkingSteps   int                          `json:"max_thinking_steps"`
+	LearnRelationships bool                         `json:"learn_relationships"`
+	IncludeReasoning   bool                         `json:"include_reasoning"`
+	MaxContextLength   int                          `json:"max_context_length"`
+	SegmentContext     bool                         `json:"segment_context"`
+	FourTier           *schema.FourTierSearchOptions `json:"four_tier,omitempty"`
+}
+
+func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErr(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	var req thinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("text is required"))
+		return
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = "default"
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 8
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	tq := &schema.ThinkQuery{
+		Text:               text,
+		SessionID:          sessionID,
+		Limit:              limit,
+		HopDepth:           req.HopDepth,
+		AnalyzeQuery:       req.AnalyzeQuery,
+		EnableThinking:     req.EnableThinking,
+		MaxThinkingSteps:   req.MaxThinkingSteps,
+		LearnRelationships: req.LearnRelationships,
+		IncludeReasoning:   req.IncludeReasoning,
+		MaxContextLength:   req.MaxContextLength,
+		SegmentContext:     req.SegmentContext,
+		FourTier:           req.FourTier,
+	}
+	if tq.MaxThinkingSteps <= 0 && tq.EnableThinking {
+		tq.MaxThinkingSteps = 3
+	}
+
+	res, err := s.deps.Engine.Think(r.Context(), tq)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleGraphStats(w http.ResponseWriter, r *http.Request) {
@@ -588,12 +781,13 @@ func toDataPointCards(points []*schema.DataPoint) []map[string]interface{} {
 	for _, dp := range points {
 		itemType := dataPointKind(dp)
 		cards = append(cards, map[string]interface{}{
-			"id":         dp.ID,
-			"content":    dp.Content,
-			"session_id": dp.SessionID,
-			"item_type":  itemType,
-			"status":     dp.ProcessingStatus,
-			"updated_at": dp.UpdatedAt,
+			"id":          dp.ID,
+			"content":     dp.Content,
+			"session_id":  dp.SessionID,
+			"item_type":   itemType,
+			"memory_tier": schema.MemoryTierFromDataPoint(dp),
+			"status":      dp.ProcessingStatus,
+			"updated_at":  dp.UpdatedAt,
 		})
 	}
 	return cards

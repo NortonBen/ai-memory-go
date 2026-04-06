@@ -126,14 +126,23 @@ func (m *mockStorage) StoreDataPoint(ctx context.Context, dp *schema.DataPoint) 
 func (m *mockStorage) QueryDataPoints(ctx context.Context, query *storage.DataPointQuery) ([]*schema.DataPoint, error) {
 	var res []*schema.DataPoint
 	for _, dp := range m.dataPoints {
-		if query.SearchText != "" && dp.Content == query.SearchText && dp.SessionID == query.SessionID {
-			res = append(res, dp)
+		if query.SessionID != "" && dp.SessionID != query.SessionID {
+			continue
 		}
+		if query.SearchText != "" && dp.Content != query.SearchText {
+			continue
+		}
+		res = append(res, dp)
 	}
 	return res, nil
 }
 
-func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) { return nil, nil }
+func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) {
+	if m.dataPoints == nil {
+		return nil, nil
+	}
+	return m.dataPoints[id], nil
+}
 func (m *mockStorage) UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error { return nil }
 func (m *mockStorage) DeleteDataPoint(ctx context.Context, id string) error { return nil }
 func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error { return nil }
@@ -167,7 +176,32 @@ func (m *mockEmbedder) GetDimensions() int { return 3 }
 func (m *mockEmbedder) GetModel() string { return "mock-model" }
 func (m *mockEmbedder) Health(ctx context.Context) error { return nil }
 
+func TestAddWithMemoryTier(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStorage()
+	eng := NewMemoryEngine(nil, nil, store, EngineConfig{MaxWorkers: 1})
+	defer eng.Close()
 
+	dp, err := eng.Add(ctx, "nội dung cốt lõi", WithSessionID("s1"), WithMemoryTier(schema.MemoryTierCore))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := schema.MemoryTierFromDataPoint(dp); got != schema.MemoryTierCore {
+		t.Fatalf("memory_tier: got %q want %q", got, schema.MemoryTierCore)
+	}
+
+	// Cùng nội dung, tier khác → không dedupe, thêm bản ghi mới.
+	dp2, err := eng.Add(ctx, "nội dung cốt lõi", WithSessionID("s1"), WithMemoryTier(schema.MemoryTierStorage))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dp2.ID == dp.ID {
+		t.Fatal("expected second DataPoint for different tier")
+	}
+	if schema.MemoryTierFromDataPoint(dp2) != schema.MemoryTierStorage {
+		t.Fatalf("second tier: got %q", schema.MemoryTierFromDataPoint(dp2))
+	}
+}
 
 // ----- Tests -----
 

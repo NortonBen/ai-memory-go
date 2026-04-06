@@ -15,6 +15,7 @@ import (
 var (
 	addFile string
 	addURL  string
+	addTier string
 )
 
 var addCmd = &cobra.Command{
@@ -69,7 +70,11 @@ var addCmd = &cobra.Command{
 		}
 
 		sessionID := GetSessionID()
-		dp, err := eng.Add(ctx, content, engine.WithSessionID(sessionID))
+		addOpts := []engine.AddOption{engine.WithSessionID(sessionID)}
+		if strings.TrimSpace(addTier) != "" {
+			addOpts = append(addOpts, engine.WithMemoryTier(addTier))
+		}
+		dp, err := eng.Add(ctx, content, addOpts...)
 		if err != nil {
 			color.Red("Error adding memory: %v", err)
 			return
@@ -83,4 +88,5 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 	addCmd.Flags().StringVar(&addFile, "file", "", "read content from file")
 	addCmd.Flags().StringVar(&addURL, "url", "", "read content from URL")
+	addCmd.Flags().StringVar(&addTier, "tier", "", "memory partition: core, general, data, storage")
 }

@@ -27,6 +27,13 @@
       .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
       .pager { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+      .tier-badge { font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; display: inline-block; letter-spacing: 0.02em; }
+      .tier-core { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+      .tier-general { background: #e0e7ff; color: #3730a3; border: 1px solid #a5b4fc; }
+      .tier-data { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+      .tier-storage { background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; }
+      textarea.add-box { min-width: 280px; min-height: 100px; width: 100%; max-width: 640px; font-family: inherit; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
+      label.inline { display: inline-flex; align-items: center; gap: 6px; }
     </style>
   </head>
   <body>
@@ -41,6 +48,25 @@
           throw new Error(err.error || "Request failed");
         }
         return res.json();
+      }
+
+      async function apiPost(path, body) {
+        const res = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Request failed" }));
+          throw new Error(err.error || "Request failed");
+        }
+        return res.json();
+      }
+
+      function TierBadge({ tier }) {
+        const t = (tier || "general").toLowerCase();
+        const cls = ["tier-badge", `tier-${t}`].join(" ");
+        return <span className={cls}>{t}</span>;
       }
 
       function pickNodeLabel(node) {
@@ -87,6 +113,36 @@
         const [vectorsPage, setVectorsPage] = useState(1);
         const [query, setQuery] = useState("");
         const [searchResult, setSearchResult] = useState(null);
+        const [searchSession, setSearchSession] = useState("default");
+        const [searchFourTier, setSearchFourTier] = useState(true);
+        const [searchIncludeStorage, setSearchIncludeStorage] = useState(false);
+        const [searchAutoStorage, setSearchAutoStorage] = useState(true);
+        const [searchWeakTh, setSearchWeakTh] = useState("0.35");
+        const [thinkText, setThinkText] = useState("");
+        const [thinkSession, setThinkSession] = useState("default");
+        const [thinkLimit, setThinkLimit] = useState("8");
+        const [thinkHopDepth, setThinkHopDepth] = useState("2");
+        const [thinkAnalyzeQuery, setThinkAnalyzeQuery] = useState(true);
+        const [thinkEnableThinking, setThinkEnableThinking] = useState(false);
+        const [thinkIncludeReasoning, setThinkIncludeReasoning] = useState(true);
+        const [thinkLearnRel, setThinkLearnRel] = useState(false);
+        const [thinkMaxSteps, setThinkMaxSteps] = useState("3");
+        const [thinkMaxCtx, setThinkMaxCtx] = useState("0");
+        const [thinkSegment, setThinkSegment] = useState(false);
+        const [thinkFourTier, setThinkFourTier] = useState(true);
+        const [thinkIncludeStorage, setThinkIncludeStorage] = useState(false);
+        const [thinkAutoStorage, setThinkAutoStorage] = useState(true);
+        const [thinkWeakTh, setThinkWeakTh] = useState("0.35");
+        const [thinkResult, setThinkResult] = useState(null);
+        const [thinkLoading, setThinkLoading] = useState(false);
+        const [tierFilter, setTierFilter] = useState("all");
+        const [addContent, setAddContent] = useState("");
+        const [addSession, setAddSession] = useState("default");
+        const [addTier, setAddTier] = useState("general");
+        const [addCognify, setAddCognify] = useState(true);
+        const [addMessage, setAddMessage] = useState("");
+        const [addFileName, setAddFileName] = useState("");
+        const addFileRef = useRef(null);
         const [graphStats, setGraphStats] = useState(null);
         const [graphNodeID, setGraphNodeID] = useState("");
         const [graphNeighbors, setGraphNeighbors] = useState(null);
@@ -96,28 +152,29 @@
         const graphRef = useRef(null);
 
         const loadOverview = async () => setOverview(await api("/api/overview"));
+        const tierQ = () => (tierFilter && tierFilter !== "all" ? `&tier=${encodeURIComponent(tierFilter)}` : "");
         const loadDataPoints = async () => {
           const offset = (dpPage - 1) * pageSize;
-          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}`);
+          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}${tierQ()}`);
           setDatapoints(resp.items || []);
           setDatapointsTotal(resp.total || 0);
         };
         const loadInputs = async () => {
           const offset = (inputsPage - 1) * pageSize;
-          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}`);
+          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}${tierQ()}`);
           setInputs(resp.items || []);
           setInputsTotal(resp.total || 0);
         };
         const loadProcessed = async () => {
           const offset = (processedPage - 1) * pageSize;
-          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}`);
+          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}${tierQ()}`);
           setProcessed(resp.items || []);
           setProcessedTotal(resp.total || 0);
         };
         const loadRelationships = async () => setRelationships(await api("/api/relationships?limit=200"));
         const loadVectors = async () => {
           const offset = (vectorsPage - 1) * pageSize;
-          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}`);
+          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}${tierQ()}`);
           setVectors(resp.items || []);
           setVectorsTotal(resp.total || 0);
         };
@@ -139,28 +196,28 @@
 
         useEffect(() => {
           setDpPage(1);
-        }, [dpKindFilter, dpStatusFilter, pageSize]);
+        }, [dpKindFilter, dpStatusFilter, pageSize, tierFilter]);
         useEffect(() => {
           loadDataPoints().catch((e) => setError(e.message));
         }, [dpKindFilter, dpStatusFilter, dpPage, pageSize]);
 
         useEffect(() => {
           setInputsPage(1);
-        }, [inputStatusFilter, pageSize]);
+        }, [inputStatusFilter, pageSize, tierFilter]);
         useEffect(() => {
           loadInputs().catch((e) => setError(e.message));
         }, [inputStatusFilter, inputsPage, pageSize]);
 
         useEffect(() => {
           setProcessedPage(1);
-        }, [processedStatusFilter, pageSize]);
+        }, [processedStatusFilter, pageSize, tierFilter]);
         useEffect(() => {
           loadProcessed().catch((e) => setError(e.message));
         }, [processedStatusFilter, processedPage, pageSize]);
 
         useEffect(() => {
           setVectorsPage(1);
-        }, [vecKindFilter, vecStatusFilter, pageSize]);
+        }, [vecKindFilter, vecStatusFilter, pageSize, tierFilter]);
         useEffect(() => {
           loadVectors().catch((e) => setError(e.message));
         }, [vecKindFilter, vecStatusFilter, vectorsPage, pageSize]);
@@ -323,7 +380,100 @@
           if (!query.trim()) return;
           try {
             setError("");
-            setSearchResult(await api(`/api/search?q=${encodeURIComponent(query)}&limit=8`));
+            let url = `/api/search?q=${encodeURIComponent(query)}&limit=8&session=${encodeURIComponent((searchSession || "default").trim() || "default")}`;
+            if (searchFourTier) {
+              url += "&four_tier=true";
+              if (searchIncludeStorage) url += "&include_storage=true";
+              if (searchAutoStorage) url += "&auto_storage=true";
+              const w = parseFloat(searchWeakTh, 10);
+              if (!Number.isNaN(w) && w > 0) url += `&weak_threshold=${encodeURIComponent(String(w))}`;
+            }
+            setSearchResult(await api(url));
+          } catch (e) {
+            setError(e.message);
+          }
+        }
+
+        async function runThink() {
+          if (!thinkText.trim()) {
+            setError("Nhập câu hỏi cho Think.");
+            return;
+          }
+          setThinkLoading(true);
+          setError("");
+          try {
+            const lim = parseInt(thinkLimit, 10);
+            const hop = parseInt(thinkHopDepth, 10);
+            const maxSteps = parseInt(thinkMaxSteps, 10);
+            const maxCtx = parseInt(thinkMaxCtx, 10);
+            const body = {
+              text: thinkText.trim(),
+              session_id: (thinkSession || "default").trim() || "default",
+              limit: Number.isFinite(lim) && lim > 0 ? lim : 8,
+              hop_depth: Number.isFinite(hop) && hop > 0 ? hop : 2,
+              analyze_query: thinkAnalyzeQuery,
+              enable_thinking: thinkEnableThinking,
+              include_reasoning: thinkIncludeReasoning,
+              learn_relationships: thinkLearnRel,
+              max_thinking_steps: Number.isFinite(maxSteps) && maxSteps > 0 ? maxSteps : 3,
+              max_context_length: Number.isFinite(maxCtx) && maxCtx > 0 ? maxCtx : 0,
+              segment_context: thinkSegment,
+            };
+            if (thinkFourTier) {
+              const en = true;
+              const w = parseFloat(thinkWeakTh, 10);
+              body.four_tier = {
+                enabled: en,
+                include_storage_tier: thinkIncludeStorage,
+                auto_storage_if_weak: thinkAutoStorage,
+                weak_score_threshold: !Number.isNaN(w) && w > 0 ? w : 0.35,
+              };
+            }
+            setThinkResult(await apiPost("/api/think", body));
+          } catch (e) {
+            setError(e.message);
+            setThinkResult(null);
+          } finally {
+            setThinkLoading(false);
+          }
+        }
+
+        function onAddFileChange(ev) {
+          const f = ev.target?.files?.[0];
+          if (!f) return;
+          setAddFileName(f.name);
+          const reader = new FileReader();
+          reader.onload = () => {
+            setAddContent(String(reader.result ?? ""));
+            setAddMessage(`Đã nạp file: ${f.name} (${(f.size / 1024).toFixed(1)} KB)`);
+          };
+          reader.onerror = () => {
+            setError("Không đọc được file.");
+            setAddFileName("");
+          };
+          reader.readAsText(f, "UTF-8");
+          ev.target.value = "";
+        }
+
+        async function submitAddMemory() {
+          if (!addContent.trim()) {
+            setAddMessage("Nhập nội dung hoặc chọn file.");
+            return;
+          }
+          try {
+            setError("");
+            setAddMessage("");
+            const r = await apiPost("/api/memory", {
+              content: addContent,
+              session_id: (addSession || "default").trim() || "default",
+              tier: addTier,
+              cognify: addCognify,
+            });
+            setAddMessage(`Đã thêm: ${r.id} (tier: ${r.memory_tier})${r.cognify_queued ? " — cognify đã xếp hàng." : ""}`);
+            setAddContent("");
+            setAddFileName("");
+            if (addFileRef.current) addFileRef.current.value = "";
+            await refreshAll();
           } catch (e) {
             setError(e.message);
           }
@@ -336,7 +486,7 @@
             {error ? <div className="card" style={{ borderColor: "#ef4444" }}>{error}</div> : null}
 
             <div className="row" style={{ marginBottom: "16px" }}>
-              {["overview", "inputs", "processed", "datapoints", "vectors", "relationships", "graph", "search"].map((name) => (
+              {["overview", "add", "inputs", "processed", "datapoints", "vectors", "relationships", "graph", "search", "think"].map((name) => (
                 <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>
                   {name}
                 </button>
@@ -344,9 +494,69 @@
               <button onClick={() => refreshAll().catch((e) => setError(e.message))}>Làm mới dữ liệu</button>
             </div>
 
+            {tab === "add" && (
+              <div className="card">
+                <h3 style={{ marginTop: 0 }}>Thêm bộ nhớ (chọn tier)</h3>
+                <p className="muted">
+                  Gửi lên <code>POST /api/memory</code> — có thể gõ trực tiếp hoặc <strong>chọn file</strong> (đọc UTF-8: .txt, .md, .json, mã nguồn…). File nhị phân/PDF cần xử lý ngoài rồi dán nội dung.
+                </p>
+                <div className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                  <label>
+                    Session{" "}
+                    <input value={addSession} onChange={(e) => setAddSession(e.target.value)} placeholder="default" style={{ minWidth: "200px" }} />
+                  </label>
+                  <label>
+                    Tier{" "}
+                    <select value={addTier} onChange={(e) => setAddTier(e.target.value)}>
+                      <option value="general">general</option>
+                      <option value="core">core</option>
+                      <option value="data">data</option>
+                      <option value="storage">storage</option>
+                    </select>
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={addCognify} onChange={(e) => setAddCognify(e.target.checked)} />
+                    Cognify bất đồng bộ sau khi add
+                  </label>
+                  <div className="row" style={{ alignItems: "center", marginTop: "4px" }}>
+                    <label className="inline" style={{ cursor: "pointer" }}>
+                      <span style={{ fontWeight: 600 }}>Nạp từ file</span>
+                      <input
+                        ref={addFileRef}
+                        type="file"
+                        onChange={onAddFileChange}
+                        style={{ maxWidth: "min(100%, 360px)" }}
+                      />
+                    </label>
+                    {addFileName ? <span className="muted">Đã chọn (trong ô dưới): {addFileName}</span> : null}
+                  </div>
+                  <textarea
+                    className="add-box"
+                    value={addContent}
+                    onChange={(e) => setAddContent(e.target.value)}
+                    placeholder="Nội dung cần lưu — hoặc chọn file phía trên để điền vào đây..."
+                  />
+                  <div className="row">
+                    <button onClick={() => submitAddMemory()}>Thêm</button>
+                  </div>
+                  {addMessage ? <div className="muted" style={{ marginTop: "8px" }}>{addMessage}</div> : null}
+                </div>
+              </div>
+            )}
+
             {tab === "inputs" && (
               <div className="card">
                 <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Tier{" "}
+                    <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="core">core</option>
+                      <option value="general">general</option>
+                      <option value="data">data</option>
+                      <option value="storage">storage</option>
+                    </select>
+                  </label>
                   <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
@@ -371,12 +581,13 @@
                 {inputs.length === 0 ? <div className="empty">Không có input records với filter status: <code>{inputStatusFilter}</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Content</th><th>Status</th><th>Progress</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Content</th><th>Status</th><th>Progress</th></tr>
                   </thead>
                   <tbody>
                     {inputs.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
+                        <td><TierBadge tier={d.memory_tier} /></td>
                         <td>{d.content?.slice(0, 140)}</td>
                         <td>{d.status}</td>
                         <td>{d.processed_chunks || 0}/{d.total_chunks || 0}</td>
@@ -401,6 +612,16 @@
               <div className="card">
                 <div className="row" style={{ marginBottom: "10px" }}>
                   <label>
+                    Tier{" "}
+                    <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="core">core</option>
+                      <option value="general">general</option>
+                      <option value="data">data</option>
+                      <option value="storage">storage</option>
+                    </select>
+                  </label>
+                  <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
                       <option value="10">10</option>
@@ -424,12 +645,13 @@
                 {processed.length === 0 ? <div className="empty">Không có processed datapoints với filter status: <code>{processedStatusFilter}</code>. Thử để <code>all</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
                   </thead>
                   <tbody>
                     {processed.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
+                        <td><TierBadge tier={d.memory_tier} /></td>
                         <td>{d.parent_id || "-"}</td>
                         <td>{Number.isInteger(d.chunk_index) ? `${d.chunk_index + 1}/${d.total_chunks || "?"}` : "-"}</td>
                         <td>{d.status}</td>
@@ -466,6 +688,13 @@
                   <div className="metric"><strong>Processing</strong><div>{overview.status_summary?.processing ?? 0}</div></div>
                   <div className="metric"><strong>Completed</strong><div>{overview.status_summary?.completed ?? 0}</div></div>
                 </div>
+                <h3 style={{ marginTop: "14px" }}>Theo memory tier</h3>
+                <div className="row" style={{ marginTop: "6px", alignItems: "center" }}>
+                  <div className="metric"><strong>Core</strong><div>{overview.tier_summary?.core ?? 0}</div></div>
+                  <div className="metric"><strong>General</strong><div>{overview.tier_summary?.general ?? 0}</div></div>
+                  <div className="metric"><strong>Data</strong><div>{overview.tier_summary?.data ?? 0}</div></div>
+                  <div className="metric"><strong>Storage</strong><div>{overview.tier_summary?.storage ?? 0}</div></div>
+                </div>
                 <h3>Latest</h3>
                 <pre>{JSON.stringify(overview.latest, null, 2)}</pre>
                 {overview.datapoint_count === 0 && (
@@ -491,6 +720,16 @@
             {tab === "datapoints" && (
               <div className="card">
                 <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Tier{" "}
+                    <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="core">core</option>
+                      <option value="general">general</option>
+                      <option value="data">data</option>
+                      <option value="storage">storage</option>
+                    </select>
+                  </label>
                   <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
@@ -526,7 +765,7 @@
                 ) : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
                   </thead>
                   <tbody>
                     {datapoints.map((d) => (
@@ -539,6 +778,7 @@
                             <div className="muted">chunk: #{d.chunk_index + 1}/{d.total_chunks || "?"}</div>
                           ) : null}
                         </td>
+                        <td><TierBadge tier={d.memory_tier} /></td>
                         <td>{d.content?.slice(0, 120)}</td>
                         <td>
                           <div>{d.status}</div>
@@ -568,6 +808,16 @@
             {tab === "vectors" && (
               <div className="card">
                 <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Tier{" "}
+                    <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value)}>
+                      <option value="all">all</option>
+                      <option value="core">core</option>
+                      <option value="general">general</option>
+                      <option value="data">data</option>
+                      <option value="storage">storage</option>
+                    </select>
+                  </label>
                   <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
@@ -601,7 +851,25 @@
                 {vectors.length === 0 ? (
                   <div className="empty">Chưa có vector embedding. Hãy chạy <code>cognify</code> sau khi <code>add</code>.</div>
                 ) : null}
-                <pre>{JSON.stringify(vectors, null, 2)}</pre>
+                {vectors.length > 0 ? (
+                  <table style={{ marginBottom: "12px" }}>
+                    <thead>
+                      <tr><th>ID</th><th>Tier (DP)</th><th>Tier (vector)</th><th>Content</th></tr>
+                    </thead>
+                    <tbody>
+                      {vectors.map((v) => (
+                        <tr key={v.id}>
+                          <td>{v.id}</td>
+                          <td><TierBadge tier={v.memory_tier} /></td>
+                          <td><TierBadge tier={v.vec_tier || v.memory_tier} /></td>
+                          <td>{v.content?.slice(0, 100)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : null}
+                <p className="muted">Chi tiết embedding (preview)</p>
+                <pre style={{ maxHeight: "240px" }}>{JSON.stringify(vectors, null, 2)}</pre>
                 <div className="pager">
                   <button disabled={vectorsPage <= 1} onClick={() => setVectorsPage((p) => Math.max(1, p - 1))}>Prev</button>
                   <span className="muted">Page {vectorsPage} / {Math.max(1, Math.ceil(vectorsTotal / pageSize))} ({vectorsTotal} items)</span>
@@ -706,11 +974,147 @@
 
             {tab === "search" && (
               <div className="card">
+                <h3 style={{ marginTop: 0 }}>Tìm kiếm (four-tier)</h3>
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Session{" "}
+                    <input value={searchSession} onChange={(e) => setSearchSession(e.target.value)} placeholder="default" style={{ minWidth: "160px" }} />
+                  </label>
+                </div>
+                <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
+                  <label className="inline">
+                    <input type="checkbox" checked={searchFourTier} onChange={(e) => setSearchFourTier(e.target.checked)} />
+                    Bật pipeline 4 tầng (four_tier)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={searchIncludeStorage} onChange={(e) => setSearchIncludeStorage(e.target.checked)} disabled={!searchFourTier} />
+                    include_storage (song song)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={searchAutoStorage} onChange={(e) => setSearchAutoStorage(e.target.checked)} disabled={!searchFourTier} />
+                    auto_storage (lazy nếu điểm yếu)
+                  </label>
+                  <label>
+                    weak_threshold{" "}
+                    <input value={searchWeakTh} onChange={(e) => setSearchWeakTh(e.target.value)} disabled={!searchFourTier} style={{ minWidth: "72px" }} />
+                  </label>
+                </div>
                 <div className="row">
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type query..." />
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Câu truy vấn..." style={{ flex: "1", minWidth: "200px" }} />
                   <button onClick={runSearch}>Search</button>
                 </div>
+                <p className="muted" style={{ marginTop: "10px" }}>
+                  Kết quả gồm <code>four_tier_stats</code> khi bật 4 tầng; <code>parsed_context</code> có tiêu đề merged tier.
+                </p>
                 <pre>{JSON.stringify(searchResult, null, 2)}</pre>
+              </div>
+            )}
+
+            {tab === "think" && (
+              <div className="card">
+                <h3 style={{ marginTop: 0 }}>Think</h3>
+                <p className="muted">
+                  Truy hồi bộ nhớ (giống Search) rồi gọi LLM trả lời có luận cứ — <code>POST /api/think</code>. Cần LLM (vd. LM Studio) trong config CLI.
+                </p>
+                <div className="row" style={{ marginBottom: "10px" }}>
+                  <label>
+                    Session{" "}
+                    <input value={thinkSession} onChange={(e) => setThinkSession(e.target.value)} placeholder="default" style={{ minWidth: "160px" }} />
+                  </label>
+                  <label>
+                    Limit{" "}
+                    <input value={thinkLimit} onChange={(e) => setThinkLimit(e.target.value)} style={{ width: "56px" }} />
+                  </label>
+                  <label>
+                    Hop depth{" "}
+                    <input value={thinkHopDepth} onChange={(e) => setThinkHopDepth(e.target.value)} style={{ width: "56px" }} />
+                  </label>
+                </div>
+                <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkAnalyzeQuery} onChange={(e) => setThinkAnalyzeQuery(e.target.checked)} />
+                    analyze_query (tiền phân tích LLM)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkEnableThinking} onChange={(e) => setThinkEnableThinking(e.target.checked)} />
+                    enable_thinking (vòng lặp agentic)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkIncludeReasoning} onChange={(e) => setThinkIncludeReasoning(e.target.checked)} />
+                    include_reasoning (JSON có reasoning)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkLearnRel} onChange={(e) => setThinkLearnRel(e.target.checked)} />
+                    learn_relationships
+                  </label>
+                </div>
+                <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
+                  <label>
+                    max_thinking_steps{" "}
+                    <input value={thinkMaxSteps} onChange={(e) => setThinkMaxSteps(e.target.value)} style={{ width: "48px" }} disabled={!thinkEnableThinking} />
+                  </label>
+                  <label>
+                    max_context_length{" "}
+                    <input value={thinkMaxCtx} onChange={(e) => setThinkMaxCtx(e.target.value)} style={{ width: "64px" }} />
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkSegment} onChange={(e) => setThinkSegment(e.target.checked)} />
+                    segment_context
+                  </label>
+                </div>
+                <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkFourTier} onChange={(e) => setThinkFourTier(e.target.checked)} />
+                    four_tier (truy hồi 4 tầng)
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkIncludeStorage} onChange={(e) => setThinkIncludeStorage(e.target.checked)} disabled={!thinkFourTier} />
+                    include_storage_tier
+                  </label>
+                  <label className="inline">
+                    <input type="checkbox" checked={thinkAutoStorage} onChange={(e) => setThinkAutoStorage(e.target.checked)} disabled={!thinkFourTier} />
+                    auto_storage_if_weak
+                  </label>
+                  <label>
+                    weak_threshold{" "}
+                    <input value={thinkWeakTh} onChange={(e) => setThinkWeakTh(e.target.value)} disabled={!thinkFourTier} style={{ minWidth: "56px" }} />
+                  </label>
+                </div>
+                <textarea
+                  className="add-box"
+                  value={thinkText}
+                  onChange={(e) => setThinkText(e.target.value)}
+                  placeholder="Câu hỏi / yêu cầu suy luận trên bộ nhớ..."
+                />
+                <div className="row" style={{ marginTop: "10px" }}>
+                  <button onClick={() => runThink()} disabled={thinkLoading}>
+                    {thinkLoading ? "Đang Think…" : "Chạy Think"}
+                  </button>
+                </div>
+                {thinkResult ? (
+                  <div style={{ marginTop: "16px" }}>
+                    {thinkResult.answer ? (
+                      <div className="card" style={{ background: "#f0fdf4", borderColor: "#86efac" }}>
+                        <strong>Answer</strong>
+                        <p style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>{thinkResult.answer}</p>
+                      </div>
+                    ) : null}
+                    {thinkResult.reasoning ? (
+                      <div className="card" style={{ marginTop: "10px", background: "#f8fafc", borderColor: "#e2e8f0" }}>
+                        <strong>Reasoning</strong>
+                        <p style={{ margin: "8px 0 0", whiteSpace: "pre-wrap" }}>{thinkResult.reasoning}</p>
+                      </div>
+                    ) : null}
+                    {thinkResult.analysis ? (
+                      <div className="muted" style={{ marginTop: "10px" }}>
+                        <strong>Analysis</strong>
+                        <pre style={{ marginTop: "6px", maxHeight: "160px" }}>{JSON.stringify(thinkResult.analysis, null, 2)}</pre>
+                      </div>
+                    ) : null}
+                    <p className="muted" style={{ marginTop: "12px" }}>Đầy đủ JSON</p>
+                    <pre style={{ maxHeight: "360px" }}>{JSON.stringify(thinkResult, null, 2)}</pre>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

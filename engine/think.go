@@ -38,6 +38,7 @@ func (e *defaultMemoryEngine) Think(ctx context.Context, query *schema.ThinkQuer
 		Limit:     query.Limit,
 		HopDepth:  query.HopDepth,
 		Analysis:  analysis,
+		FourTier:  query.FourTier,
 	}
 	results, err := e.retrieveContext(ctx, searchQuery)
 	if err != nil {

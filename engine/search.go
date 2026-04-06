@@ -2,12 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
@@ -50,6 +47,13 @@ func (e *defaultMemoryEngine) basicSearch(ctx context.Context, query *schema.Sea
 }
 
 func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
+	if e.useFourTierSearch(query) {
+		return e.retrieveContextFourTier(ctx, query)
+	}
+	return e.retrieveContextLegacy(ctx, query)
+}
+
+func (e *defaultMemoryEngine) retrieveContextLegacy(ctx context.Context, query *schema.SearchQuery) (*schema.SearchResults, error) {
 	// ---------------------------------------------------------
 	// Step 1: Input Processing (Vectorize + Extract Entities) in parallel
 	// ---------------------------------------------------------
@@ -100,26 +104,6 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 	step1WG.Wait()
 	if embeddingErr != nil {
 		return nil, fmt.Errorf("failed to generate embedding for query: %w", embeddingErr)
-	}
-
-	// Track scores per DataPoint ID
-	type itemScore struct {
-		dp          *schema.DataPoint
-		vectorScore float64
-		graphScore  float64
-	}
-	scores := make(map[string]*itemScore)
-
-	// Helper to track datapoints
-	trackDataPoint := func(id string) *itemScore {
-		if _, exists := scores[id]; !exists {
-			// Fetch DP from relational store
-			dp, err := e.store.GetDataPoint(ctx, id)
-			if err == nil && dp != nil {
-				scores[id] = &itemScore{dp: dp}
-			}
-		}
-		return scores[id]
 	}
 
 	// ---------------------------------------------------------
@@ -199,106 +183,7 @@ func (e *defaultMemoryEngine) retrieveContext(ctx context.Context, query *schema
 
 	step2WG.Wait()
 
-	// Merge vector and graph anchors
-	anchorNodeIDs := make(map[string]bool, len(vectorAnchorNodeIDs)+len(entityAnchorNodeIDs))
-	for id := range vectorAnchorNodeIDs {
-		anchorNodeIDs[id] = true
-	}
-	for id := range entityAnchorNodeIDs {
-		anchorNodeIDs[id] = true
-	}
-
-	// Initialize tracked datapoints from vector branch results
-	for sourceID, score := range vectorScores {
-		if item := trackDataPoint(sourceID); item != nil {
-			item.vectorScore = score
-		}
-	}
-
-	// ---------------------------------------------------------
-	// Step 3: Graph Traversal
-	// ---------------------------------------------------------
-	hopDepth := query.HopDepth
-	if hopDepth <= 0 {
-		hopDepth = 2 // default to 2
-	}
-
-	graphNodesContext := make(map[string]*schema.Node)
-
-	for nodeID := range anchorNodeIDs {
-		neighbors, err := e.graphStore.TraverseGraph(ctx, nodeID, hopDepth, nil)
-		if err == nil {
-			for _, neighbor := range neighbors {
-				graphNodesContext[neighbor.ID] = neighbor
-
-				if sourceID, ok := neighbor.Properties["source_id"].(string); ok {
-					if item := trackDataPoint(sourceID); item != nil {
-						item.graphScore += 0.5
-					}
-				}
-			}
-		}
-	}
-
-	// ---------------------------------------------------------
-	// Step 4: Context Fusion + Reranking
-	// ---------------------------------------------------------
-	var rankedItems []*itemScore
-	for _, item := range scores {
-		rankedItems = append(rankedItems, item)
-	}
-
-	for _, item := range rankedItems {
-		temporalScore := 0.0
-		if time.Since(item.dp.CreatedAt).Hours() < 24*7 {
-			temporalScore = 1.0
-		}
-		
-		finalScore := (item.vectorScore * 0.40) + (item.graphScore * 0.30) + (temporalScore * 0.20)
-		item.vectorScore = finalScore // hijack vectorScore to store final score
-	}
-
-	sort.Slice(rankedItems, func(i, j int) bool {
-		return rankedItems[i].vectorScore > rankedItems[j].vectorScore
-	})
-
-	if query.Limit > 0 && len(rankedItems) > query.Limit {
-		rankedItems = rankedItems[:query.Limit]
-	}
-
-	results := &schema.SearchResults{
-		Results: make([]*schema.SearchResult, 0, len(rankedItems)),
-		Total:   len(scores),
-	}
-
-	for _, item := range rankedItems {
-		results.Results = append(results.Results, schema.NewSearchResult(item.dp, item.vectorScore, query.Mode))
-	}
-
-	// ---------------------------------------------------------
-	// Step 4b: Build merged context string
-	// ---------------------------------------------------------
-	var contextBuilder strings.Builder
-	contextBuilder.WriteString("--- MEMORIES FROM VECTOR SEARCH ---\n")
-	for i, item := range rankedItems {
-		contextBuilder.WriteString(fmt.Sprintf("[%d] (Score: %.2f):\n%s\n", i+1, item.vectorScore, item.dp.Content))
-	}
-
-	if len(graphNodesContext) > 0 {
-		contextBuilder.WriteString("\n--- KNOWLEDGE GRAPH (ENTITIES & RELATIONSHIPS) ---\n")
-		i := 1
-		for _, n := range graphNodesContext {
-			props, _ := json.Marshal(n.Properties)
-			contextBuilder.WriteString(fmt.Sprintf("- [NodeType: %s] %s: %s\n", n.Type, n.ID, string(props)))
-			i++
-			if i > 20 {
-				break
-			}
-		}
-	}
-	results.ParsedContext = contextBuilder.String()
-
-	return results, nil
+	return e.hybridRankFromVectorScores(ctx, query, extractedEntities, vectorScores, vectorAnchorNodeIDs, entityAnchorNodeIDs, nil)
 }
 
 // Search implements the 4-step Cognee-style Hybrid Search pipeline, terminating with a direct string answer.

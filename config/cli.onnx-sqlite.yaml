@@ -1,0 +1,76 @@
+# ONNX INT8 (Harrier) + SQLite — toàn bộ trọng số embedder dùng int8 (không auto/fp32).
+#
+# Chuẩn bị FP32 rồi quantize INT8 (tokenizer dùng chung thư mục -q):
+#   make build-harrier-onnx && make quantize-harrier
+# hoặc: python scripts/convert_onnx_precision.py int8 data/harrier/model.onnx data/harrier-q/model.onnx
+# (sao chép tokenizer.json vào data/harrier-q nếu quantize tay).
+#
+# onnxmodel sẽ resolve int8 từ model_path (ví dụ thử data/harrier-q/model.onnx, data/harrier/model_int8.onnx).
+# Ép int8 trong config + có thể đồng bộ env khi gọi tool khác:
+#   export ORT_MODEL_PRECISION=int8 ORT_EMBED_PRECISION=int8
+#
+# Chạy từ root repo:
+#   ./ai-memory-cli --config config/cli.onnx-sqlite.yaml cognify --session default
+#
+# Cần ONNX Runtime (ví dụ macOS: brew install onnxruntime).
+
+db:
+  datadir: data/cli_sqlite
+  vector:
+    provider: sqlite
+  graph:
+    provider: sqlite
+
+# Trích xuất thực thể / cạnh khi cognify:
+#   graph.extractor: deberta — NER ONNX cục bộ (graph.deberta.*); think/search/request vẫn dùng llm.*.
+#   graph.extractor: llm    — mọi trích xuất graph qua LLM (mặc định nếu bỏ trống).
+# DeBERTa base:
+#   make export-deberta-base     → data/deberta-ner-base/ (thường chỉ FP32 model.onnx)
+#   make export-deberta-base-q   → INT8; khi đó model_precision: int8 hoặc auto đều ổn
+# Nếu chỉ có FP32 mà để int8 → lỗi "no int8 model found". Dùng auto (ưu tiên int8 nếu có).
+graph:
+  extractor: deberta
+  deberta:
+    model_path: data/deberta-ner-q/model.onnx
+    tokenizer_path: data/deberta-ner-q/tokenizer.json
+    labels_path: data/deberta-ner-q/labels.json
+    max_seq_len: 256
+    exec_provider: ""
+    model_precision: auto
+
+embedder:
+  provider: onnx
+  # Tên hiển thị (API embedding); ONNX thực tế dùng onnx.model_path / tokenizer_path.
+  model: microsoft/harrier-oss-v1-270m
+  dimensions: 640
+  onnx:
+    # Đường dẫn tham chiếu FP32; với model_precision int8, onnxmodel chọn bản int8 (data/harrier-q/model.onnx, …).
+    model_path: data/harrier/model.onnx
+    tokenizer_path: data/harrier/tokenizer.json
+    model_precision: int8
+    max_seq_len: 512
+    query_task: "Retrieve semantically similar text"
+    use_query_instruction: true
+
+llm:
+  provider: lmstudio
+  endpoint: http://localhost:1234/v1
+  model: qwen/qwen3-4b-2507
+  api_key: ""
+
+# Tùy chọn: LLM cục bộ Phi-3 / Phi-3.5 qua ONNX Runtime GenAI (Python).
+#   pip install -r scripts/requirements-ortgenai.txt
+# CLI tự dùng .venv/bin/python3 nếu llm.ortgenai.python mặc định python3.
+#   huggingface-cli download microsoft/Phi-3-mini-4k-instruct-onnx \
+#     --include cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/* --local-dir data/phi3-onnx
+# Rồi đổi llm thành:
+# llm:
+#   provider: ortgenai
+#   model: phi-3-mini-4k-instruct-onnx
+#   api_key: ""
+#   endpoint: ""
+#   ortgenai:
+#     model_dir: data/phi3-onnx/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4
+#     python: python3
+#     script: scripts/phi_ort_genai_complete.py
+#     max_new_tokens: 512

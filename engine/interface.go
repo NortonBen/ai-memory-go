@@ -15,6 +15,8 @@ type EngineConfig struct {
 	// ChunkConcurrency is the max number of chunks processed in parallel inside a single CognifyTask.
 	// Defaults to 4 when unset or <= 0.
 	ChunkConcurrency int `json:"chunk_concurrency"`
+	// FourTier bật pipeline tìm kiếm bốn tầng (core / general / data / storage theo request).
+	FourTier schema.FourTierEngineConfig `json:"four_tier"`
 }
 
 // AddOptions holds optional parameters for the Add operation
@@ -23,6 +25,9 @@ type AddOptions struct {
 	Metadata             map[string]interface{}
 	WaitUntilComplete    bool
 	ConsistencyThreshold float32
+	// MemoryTier phân vùng 4 tầng (core / general / data / storage). Ghi vào metadata memory_tier;
+	// ưu tiên hơn memory_tier trong WithMetadata nếu cả hai được đặt.
+	MemoryTier string
 }
 
 // AddOption configures AddOptions
@@ -58,6 +63,13 @@ func WithConsistencyThreshold(threshold float32) AddOption {
 func WithSessionID(sessionID string) AddOption {
 	return func(o *AddOptions) {
 		o.SessionID = sessionID
+	}
+}
+
+// WithMemoryTier chọn phân vùng lưu trữ cho bản ghi (schema.MemoryTier*). Chuỗi không hợp lệ được chuẩn hóa về general.
+func WithMemoryTier(tier string) AddOption {
+	return func(o *AddOptions) {
+		o.MemoryTier = tier
 	}
 }
 

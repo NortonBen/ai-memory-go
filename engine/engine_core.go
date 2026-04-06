@@ -22,6 +22,7 @@ type defaultMemoryEngine struct {
 	graphStore  graph.GraphStore
 	vectorStore vector.VectorStore
 	workerPool  *WorkerPool
+	fourTier    schema.FourTierEngineConfig
 }
 
 // NewMemoryEngine creates a new instance of MemoryEngine using only the relational store (fallback).
@@ -42,6 +43,7 @@ func NewMemoryEngine(ext extractor.LLMExtractor, emb vector.EmbeddingProvider, s
 		embedder:   emb,
 		store:      store,
 		workerPool: pool,
+		fourTier:   cfg.FourTier,
 	}
 }
 
@@ -65,6 +67,7 @@ func NewMemoryEngineWithStores(ext extractor.LLMExtractor, emb vector.EmbeddingP
 		graphStore:  graphStore,
 		vectorStore: vectorStore,
 		workerPool:  pool,
+		fourTier:    cfg.FourTier,
 	}
 
 	// Start background history analysis if enabled
@@ -112,7 +115,16 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		}
 	}
 
-	// Deduplication: Check if this exact content already exists for this session
+	candidateTier := schema.MemoryTierGeneral
+	if strings.TrimSpace(options.MemoryTier) != "" {
+		candidateTier = schema.NormalizeMemoryTier(options.MemoryTier)
+	} else if options.Metadata != nil {
+		if v, ok := options.Metadata["memory_tier"].(string); ok && strings.TrimSpace(v) != "" {
+			candidateTier = schema.NormalizeMemoryTier(v)
+		}
+	}
+
+	// Deduplication: Check if this exact content already exists for this session (cùng memory_tier).
 	searchQuery := &storage.DataPointQuery{
 		SearchText: content,
 		SearchMode: "exact",
@@ -125,6 +137,9 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		for _, existing := range existingMatches {
 			if existing != nil && existing.Metadata != nil {
 				if isInput, ok := existing.Metadata["is_input"].(bool); ok && isInput {
+					if schema.MemoryTierFromDataPoint(existing) != candidateTier {
+						continue
+					}
 					return existing, nil
 				}
 			}
@@ -147,6 +162,7 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 	}
 	dp.Metadata["is_input"] = true
 	dp.Metadata["is_chunk"] = false
+	dp.Metadata["memory_tier"] = candidateTier
 
 	// Persist the initial pending DataPoint
 	err := e.store.StoreDataPoint(ctx, dp)

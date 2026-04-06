@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	"github.com/NortonBen/ai-memory-go/extractor"
+	"github.com/NortonBen/ai-memory-go/extractor/deberta"
 	"github.com/NortonBen/ai-memory-go/extractor/registry"
 	"github.com/NortonBen/ai-memory-go/graph"
 	"github.com/NortonBen/ai-memory-go/storage"
@@ -260,7 +262,29 @@ func initRuntime(ctx context.Context) (*RuntimeComponents, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to init llm provider: %w", err)
 	}
-	llmExt := extractor.NewBasicExtractor(llmProv, nil)
+	llmBasic := extractor.NewBasicExtractor(llmProv, nil)
+
+	var llmExt extractor.LLMExtractor = llmBasic
+	switch strings.ToLower(strings.TrimSpace(viper.GetString("graph.extractor"))) {
+	case "deberta":
+		debCfg := deberta.Config{
+			ModelPath:      viper.GetString("graph.deberta.model_path"),
+			TokenizerPath:  viper.GetString("graph.deberta.tokenizer_path"),
+			LabelsPath:     viper.GetString("graph.deberta.labels_path"),
+			MaxSeqLen:      viper.GetInt("graph.deberta.max_seq_len"),
+			ExecProvider:   viper.GetString("graph.deberta.exec_provider"),
+			ModelPrecision: viper.GetString("graph.deberta.model_precision"),
+		}
+		debExt, derr := deberta.NewExtractor(debCfg)
+		if derr != nil {
+			return nil, fmt.Errorf("graph extractor deberta: %w", derr)
+		}
+		llmExt = extractor.NewHybridGraphExtractor(debExt, llmBasic)
+	case "", "llm":
+		// mặc định: toàn bộ trích xuất graph qua LLM (BasicExtractor)
+	default:
+		return nil, fmt.Errorf("graph.extractor: unsupported value %q (use llm or deberta)", viper.GetString("graph.extractor"))
+	}
 
 	eng := engine.NewMemoryEngineWithStores(llmExt, embedder, relStore, graphStore, vecStore, engine.EngineConfig{MaxWorkers: 4})
 	return &RuntimeComponents{

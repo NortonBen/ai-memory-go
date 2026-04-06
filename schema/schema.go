@@ -755,6 +755,7 @@ type SearchQuery struct {
 	TimeRange           *TimeRange             `json:"time_range,omitempty"`
 	MaxContextLength    int                    `json:"max_context_length,omitempty"` // Maximum characters to include in ParsedContext
 	Analysis            *ThinkQueryAnalysis    `json:"analysis,omitempty"`           // Optional analysis for optimized retrieval
+	FourTier            *FourTierSearchOptions `json:"four_tier,omitempty"`          // Ghi đè tìm kiếm bốn tầng theo request
 }
 
 // SearchResults contains the results of a search operation
@@ -765,6 +766,7 @@ type SearchResults struct {
 	ContextSize   int             `json:"context_size"`
 	Answer        string          `json:"answer,omitempty"`
 	ParsedContext string          `json:"parsed_context,omitempty"`
+	FourTierStats *FourTierSearchStats `json:"four_tier_stats,omitempty"`
 }
 
 // RelationshipInfo represents a detected relationship between participants or entities
@@ -805,6 +807,9 @@ type ThinkQuery struct {
 	// Query Analysis (Pre-Think)
 	AnalyzeQuery bool                `json:"analyze_query"` // If true, perform LLM-based query analysis before retrieval
 	Analysis     *ThinkQueryAnalysis `json:"analysis,omitempty"`
+
+	// FourTier tùy chọn: truyền xuống bước retrieve (Search) trong Think.
+	FourTier *FourTierSearchOptions `json:"four_tier,omitempty"`
 }
 
 // ThinkQueryAnalysis represents the LLM's pre-retrieval analysis of the query
