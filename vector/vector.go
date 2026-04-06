@@ -18,6 +18,8 @@ type VectorStore interface {
 
 	// Similarity search operations
 	SimilaritySearch(ctx context.Context, queryEmbedding []float32, limit int, threshold float64) ([]*SimilarityResult, error)
+	// SimilaritySearchWithFilter: AND trên từng cặp key→value (so khớp string, không phân biệt hoa thường).
+	// Tùy chọn nâng cao: schema.VectorFilterKeyLabelsAny để lọc theo nhãn trên payload (engine Search/Think không dùng; nhãn chỉ phân loại lúc Add).
 	SimilaritySearchWithFilter(ctx context.Context, queryEmbedding []float32, filters map[string]interface{}, limit int, threshold float64) ([]*SimilarityResult, error)
 
 	// Batch operations

@@ -71,7 +71,7 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 				if err == nil {
 					vecResults, _ := e.vectorStore.SimilaritySearch(ctx, targetEmb, 5, 0.80)
 					for _, vr := range vecResults {
-						_ = e.DeleteMemory(ctx, vr.ID, sessionID)
+						_ = e.DeleteMemory(ctx, vectorResultSourceID(vr), sessionID)
 					}
 				}
 			}
@@ -134,6 +134,7 @@ func (e *defaultMemoryEngine) Request(ctx context.Context, sessionID string, con
 			HopDepth:           hopDepth,
 			LearnRelationships: options.LearnRelationships,
 			IncludeReasoning:   options.IncludeReasoning,
+			FourTier: options.FourTier,
 		}
 		res, err := e.Think(ctx, thinkQuery)
 		if err == nil && res != nil {

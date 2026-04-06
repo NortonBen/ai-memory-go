@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 	"github.com/redis/go-redis/v9"
 )
@@ -130,11 +131,18 @@ func (s *RedisVectorStore) SimilaritySearch(ctx context.Context, queryEmbedding 
 }
 
 func (s *RedisVectorStore) SimilaritySearchWithFilter(ctx context.Context, queryEmbedding []float32, filters map[string]interface{}, limit int, threshold float64) ([]*vector.SimilarityResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	knn := limit
+	if schema.VectorSearchHasLabelFilter(filters) {
+		knn = min(limit*4, 500)
+	}
 	vecBytes := float32ToBytes(queryEmbedding)
 
 	filterStr := "*"
 
-	query := fmt.Sprintf("%s=>[KNN %d @embedding $query_vec AS distance]", filterStr, limit)
+	query := fmt.Sprintf("%s=>[KNN %d @embedding $query_vec AS distance]", filterStr, knn)
 
 	cmd := s.client.Do(ctx,
 		"FT.SEARCH", s.indexName, query,
@@ -197,6 +205,10 @@ func (s *RedisVectorStore) SimilaritySearchWithFilter(ctx context.Context, query
 			_ = json.Unmarshal(metaJSON, &metadata)
 		}
 
+		if len(filters) > 0 && !schema.MetadataMatchesVectorSearchFilters(metadata, filters) {
+			continue
+		}
+
 		vec := bytesToFloat32(embBytes)
 
 		id := strings.TrimPrefix(key, "vec:")
@@ -207,6 +219,9 @@ func (s *RedisVectorStore) SimilaritySearchWithFilter(ctx context.Context, query
 			Embedding: vec,
 			Distance:  distance,
 		})
+		if len(results) >= limit {
+			break
+		}
 	}
 
 	return results, nil

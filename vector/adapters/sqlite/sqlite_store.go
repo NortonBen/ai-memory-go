@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
@@ -239,7 +239,7 @@ func (s *SQLiteVectorStore) SimilaritySearchWithFilter(ctx context.Context, quer
 		}
 		matched := 0
 		for _, r := range candidates {
-			if vecMatchesFilters(r.metadata, filters) {
+			if schema.MetadataMatchesVectorSearchFilters(r.metadata, filters) {
 				score := 1.0 / (1.0 + r.distance)
 				if score >= threshold {
 					matched++
@@ -258,7 +258,7 @@ func (s *SQLiteVectorStore) SimilaritySearchWithFilter(ctx context.Context, quer
 		if score < threshold {
 			continue
 		}
-		if !vecMatchesFilters(r.metadata, filters) {
+		if !schema.MetadataMatchesVectorSearchFilters(r.metadata, filters) {
 			continue
 		}
 		results = append(results, &vector.SimilarityResult{
@@ -325,19 +325,6 @@ func blobToF32(b []byte) []float32 {
 		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
 	}
 	return v
-}
-
-func vecMatchesFilters(metadata map[string]interface{}, filters map[string]interface{}) bool {
-	if len(filters) == 0 {
-		return true
-	}
-	for k, v := range filters {
-		mv, ok := metadata[k]
-		if !ok || !strings.EqualFold(fmt.Sprintf("%v", mv), fmt.Sprintf("%v", v)) {
-			return false
-		}
-	}
-	return true
 }
 
 func (s *SQLiteVectorStore) validateVectorDim(v []float32) error {

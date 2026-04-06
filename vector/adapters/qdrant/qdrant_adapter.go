@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 	"github.com/google/uuid"
 	qd "github.com/qdrant/go-client/qdrant"
@@ -308,16 +309,23 @@ func (q *QdrantStore) SimilaritySearch(ctx context.Context, queryEmbedding []flo
 
 // SimilaritySearchWithFilter implements VectorStore.
 func (q *QdrantStore) SimilaritySearchWithFilter(ctx context.Context, queryEmbedding []float32, filters map[string]interface{}, limit int, threshold float64) ([]*vector.SimilarityResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	searchLimit := limit
+	if schema.VectorSearchHasLabelFilter(filters) {
+		searchLimit = min(limit*4, 200)
+	}
 	req := &qd.QueryPoints{
 		CollectionName: q.collection,
 		Query:          qd.NewQuery(queryEmbedding...),
-		Limit:          func() *uint64 { l := uint64(limit); return &l }(),
+		Limit:          func() *uint64 { l := uint64(searchLimit); return &l }(),
 		WithPayload:    &qd.WithPayloadSelector{SelectorOptions: &qd.WithPayloadSelector_Enable{Enable: true}},
 		ScoreThreshold: func() *float32 { t := float32(threshold); return &t }(),
 	}
 
-	if len(filters) > 0 {
-		req.Filter = buildFilter(filters)
+	if ef := schema.FiltersForVectorSearchEngine(filters); len(ef) > 0 {
+		req.Filter = buildFilter(ef)
 	}
 
 	resp, err := q.client.Query(ctx, req)
@@ -325,30 +333,35 @@ func (q *QdrantStore) SimilaritySearchWithFilter(ctx context.Context, queryEmbed
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
-	results := make([]*vector.SimilarityResult, len(resp))
-	for i, scored := range resp {
+	out := make([]*vector.SimilarityResult, 0, min(len(resp), limit))
+	for _, scored := range resp {
 		metadata := parsePayload(scored.Payload)
+		if len(filters) > 0 && !schema.MetadataMatchesVectorSearchFilters(metadata, filters) {
+			continue
+		}
 		id := ""
 		if scored.Id.GetUuid() != "" {
 			id = scored.Id.GetUuid()
 		} else {
 			id = fmt.Sprintf("%d", scored.Id.GetNum())
 		}
-		// Restore original ID if stored in metadata
 		if origID, ok := metadata["_original_id"]; ok {
 			id = fmt.Sprintf("%v", origID)
 		}
 
-		results[i] = &vector.SimilarityResult{
+		out = append(out, &vector.SimilarityResult{
 			ID:        id,
 			Score:     float64(scored.Score),
 			Metadata:  metadata,
-			Embedding: nil, // Qdrant doesn't return vector in search by default unless requested
-			Distance:  1.0 - float64(scored.Score), // Approximate conversion if using cosine
+			Embedding: nil,
+			Distance:  1.0 - float64(scored.Score),
+		})
+		if len(out) >= limit {
+			break
 		}
 	}
 
-	return results, nil
+	return out, nil
 }
 
 // CreateCollection implements VectorStore.

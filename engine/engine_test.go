@@ -176,6 +176,25 @@ func (m *mockEmbedder) GetDimensions() int { return 3 }
 func (m *mockEmbedder) GetModel() string { return "mock-model" }
 func (m *mockEmbedder) Health(ctx context.Context) error { return nil }
 
+func TestAddWithLabelsRuleDefaultsCoreTier(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStorage()
+	eng := NewMemoryEngine(nil, nil, store, EngineConfig{MaxWorkers: 1})
+	defer eng.Close()
+
+	dp, err := eng.Add(ctx, "Không tiết lộ mật khẩu", WithSessionID("s1"), WithLabels(schema.LabelRule))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schema.MemoryTierFromDataPoint(dp) != schema.MemoryTierCore {
+		t.Fatalf("rule label should default tier core, got %s", schema.MemoryTierFromDataPoint(dp))
+	}
+	labels := schema.LabelsFromMetadata(dp.Metadata)
+	if len(labels) != 1 || labels[0] != schema.LabelRule {
+		t.Fatalf("labels: %v", labels)
+	}
+}
+
 func TestAddWithMemoryTier(t *testing.T) {
 	ctx := context.Background()
 	store := newMockStorage()

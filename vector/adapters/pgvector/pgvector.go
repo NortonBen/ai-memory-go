@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	pgv "github.com/pgvector/pgvector-go"
@@ -165,13 +166,19 @@ func (s *PgVectorStore) SimilaritySearch(ctx context.Context, queryEmbedding []f
 }
 
 func (s *PgVectorStore) SimilaritySearchWithFilter(ctx context.Context, queryEmbedding []float32, filters map[string]interface{}, limit int, threshold float64) ([]*vector.SimilarityResult, error) {
+	engineFilters := schema.FiltersForVectorSearchEngine(filters)
+	sqlLimit := limit
+	if schema.VectorSearchHasLabelFilter(filters) {
+		sqlLimit = min(limit*4, max(limit+20, 40))
+	}
+
 	var filterConds []string
 	var args []interface{}
 
-	args = append(args, pgv.NewVector(queryEmbedding), threshold, limit)
+	args = append(args, pgv.NewVector(queryEmbedding), threshold, sqlLimit)
 	argIdx := 4
 
-	for k, v := range filters {
+	for k, v := range engineFilters {
 		filterJSON, err := json.Marshal(map[string]interface{}{k: v})
 		if err == nil {
 			filterConds = append(filterConds, fmt.Sprintf("metadata @> $%d", argIdx))
@@ -216,6 +223,10 @@ func (s *PgVectorStore) SimilaritySearchWithFilter(ctx context.Context, queryEmb
 			}
 		}
 
+		if len(filters) > 0 && !schema.MetadataMatchesVectorSearchFilters(metadata, filters) {
+			continue
+		}
+
 		results = append(results, &vector.SimilarityResult{
 			ID:        id,
 			Score:     1 - distance,
@@ -223,6 +234,9 @@ func (s *PgVectorStore) SimilaritySearchWithFilter(ctx context.Context, queryEmb
 			Metadata:  metadata,
 			Distance:  distance,
 		})
+		if len(results) >= limit {
+			break
+		}
 	}
 	return results, nil
 }

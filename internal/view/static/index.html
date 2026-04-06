@@ -34,6 +34,7 @@
       .tier-storage { background: #f3e8ff; color: #6b21a8; border: 1px solid #d8b4fe; }
       textarea.add-box { min-width: 280px; min-height: 100px; width: 100%; max-width: 640px; font-family: inherit; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
       label.inline { display: inline-flex; align-items: center; gap: 6px; }
+      button.preset-chip { padding: 4px 10px; font-size: 12px; min-width: unset; }
     </style>
   </head>
   <body>
@@ -67,6 +68,17 @@
         const t = (tier || "general").toLowerCase();
         const cls = ["tier-badge", `tier-${t}`].join(" ");
         return <span className={cls}>{t}</span>;
+      }
+
+      function LabelsCell({ primary, labels }) {
+        const labs = Array.isArray(labels) ? labels : [];
+        if (!primary && labs.length === 0) return <span className="muted">—</span>;
+        return (
+          <div style={{ maxWidth: "220px", wordBreak: "break-word" }}>
+            {primary ? <div><strong style={{ fontSize: "12px" }}>{primary}</strong></div> : null}
+            {labs.length ? <div className="muted" style={{ fontSize: "12px" }}>{labs.join(", ")}</div> : null}
+          </div>
+        );
       }
 
       function pickNodeLabel(node) {
@@ -136,6 +148,8 @@
         const [thinkResult, setThinkResult] = useState(null);
         const [thinkLoading, setThinkLoading] = useState(false);
         const [tierFilter, setTierFilter] = useState("all");
+        const [labelFilter, setLabelFilter] = useState("");
+        const [addLabelsText, setAddLabelsText] = useState("");
         const [addContent, setAddContent] = useState("");
         const [addSession, setAddSession] = useState("default");
         const [addTier, setAddTier] = useState("general");
@@ -153,28 +167,44 @@
 
         const loadOverview = async () => setOverview(await api("/api/overview"));
         const tierQ = () => (tierFilter && tierFilter !== "all" ? `&tier=${encodeURIComponent(tierFilter)}` : "");
+        const labelQ = () => (labelFilter.trim() ? `&label=${encodeURIComponent(labelFilter.trim())}` : "");
+        const parseLabelsInput = (s) =>
+          s
+            .split(/[,|]/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+        const appendAddLabel = (lab) => {
+          const t = (lab || "").trim();
+          if (!t) return;
+          setAddLabelsText((prev) => {
+            const p = prev.trim();
+            const parts = parseLabelsInput(p);
+            if (parts.includes(t)) return prev;
+            return p ? `${p}, ${t}` : t;
+          });
+        };
         const loadDataPoints = async () => {
           const offset = (dpPage - 1) * pageSize;
-          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}${tierQ()}`);
+          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}${tierQ()}${labelQ()}`);
           setDatapoints(resp.items || []);
           setDatapointsTotal(resp.total || 0);
         };
         const loadInputs = async () => {
           const offset = (inputsPage - 1) * pageSize;
-          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}${tierQ()}`);
+          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}${tierQ()}${labelQ()}`);
           setInputs(resp.items || []);
           setInputsTotal(resp.total || 0);
         };
         const loadProcessed = async () => {
           const offset = (processedPage - 1) * pageSize;
-          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}${tierQ()}`);
+          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}${tierQ()}${labelQ()}`);
           setProcessed(resp.items || []);
           setProcessedTotal(resp.total || 0);
         };
         const loadRelationships = async () => setRelationships(await api("/api/relationships?limit=200"));
         const loadVectors = async () => {
           const offset = (vectorsPage - 1) * pageSize;
-          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}${tierQ()}`);
+          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}${tierQ()}${labelQ()}`);
           setVectors(resp.items || []);
           setVectorsTotal(resp.total || 0);
         };
@@ -196,31 +226,31 @@
 
         useEffect(() => {
           setDpPage(1);
-        }, [dpKindFilter, dpStatusFilter, pageSize, tierFilter]);
+        }, [dpKindFilter, dpStatusFilter, pageSize, tierFilter, labelFilter]);
         useEffect(() => {
           loadDataPoints().catch((e) => setError(e.message));
-        }, [dpKindFilter, dpStatusFilter, dpPage, pageSize]);
+        }, [dpKindFilter, dpStatusFilter, dpPage, pageSize, tierFilter, labelFilter]);
 
         useEffect(() => {
           setInputsPage(1);
-        }, [inputStatusFilter, pageSize, tierFilter]);
+        }, [inputStatusFilter, pageSize, tierFilter, labelFilter]);
         useEffect(() => {
           loadInputs().catch((e) => setError(e.message));
-        }, [inputStatusFilter, inputsPage, pageSize]);
+        }, [inputStatusFilter, inputsPage, pageSize, tierFilter, labelFilter]);
 
         useEffect(() => {
           setProcessedPage(1);
-        }, [processedStatusFilter, pageSize, tierFilter]);
+        }, [processedStatusFilter, pageSize, tierFilter, labelFilter]);
         useEffect(() => {
           loadProcessed().catch((e) => setError(e.message));
-        }, [processedStatusFilter, processedPage, pageSize]);
+        }, [processedStatusFilter, processedPage, pageSize, tierFilter, labelFilter]);
 
         useEffect(() => {
           setVectorsPage(1);
-        }, [vecKindFilter, vecStatusFilter, pageSize, tierFilter]);
+        }, [vecKindFilter, vecStatusFilter, pageSize, tierFilter, labelFilter]);
         useEffect(() => {
           loadVectors().catch((e) => setError(e.message));
-        }, [vecKindFilter, vecStatusFilter, vectorsPage, pageSize]);
+        }, [vecKindFilter, vecStatusFilter, vectorsPage, pageSize, tierFilter, labelFilter]);
 
         const topEdges = useMemo(() => (relationships.edges || []).slice(0, 40), [relationships]);
 
@@ -463,15 +493,20 @@
           try {
             setError("");
             setAddMessage("");
-            const r = await apiPost("/api/memory", {
+            const labs = parseLabelsInput(addLabelsText);
+            const body = {
               content: addContent,
               session_id: (addSession || "default").trim() || "default",
               tier: addTier,
               cognify: addCognify,
-            });
-            setAddMessage(`Đã thêm: ${r.id} (tier: ${r.memory_tier})${r.cognify_queued ? " — cognify đã xếp hàng." : ""}`);
+            };
+            if (labs.length) body.labels = labs;
+            const r = await apiPost("/api/memory", body);
+            const labHint = labs.length ? ` — nhãn: ${labs.join(", ")}` : "";
+            setAddMessage(`Đã thêm: ${r.id} (tier: ${r.memory_tier})${labHint}${r.cognify_queued ? " — cognify đã xếp hàng." : ""}`);
             setAddContent("");
             setAddFileName("");
+            setAddLabelsText("");
             if (addFileRef.current) addFileRef.current.value = "";
             await refreshAll();
           } catch (e) {
@@ -518,6 +553,24 @@
                     <input type="checkbox" checked={addCognify} onChange={(e) => setAddCognify(e.target.checked)} />
                     Cognify bất đồng bộ sau khi add
                   </label>
+                  <div style={{ marginTop: "6px" }}>
+                    <div className="muted" style={{ marginBottom: "4px" }}>
+                      Nhãn (phân loại / tìm kiếm) — phân tách bằng dấu phẩy. Gợi ý core: <code>rule</code>, <code>policy</code>; tùy chỉnh: tên truyện, <code>info</code>…
+                    </div>
+                    <input
+                      value={addLabelsText}
+                      onChange={(e) => setAddLabelsText(e.target.value)}
+                      placeholder="vd. rule, policy  hoặc  mục thần ký, info"
+                      style={{ width: "100%", maxWidth: "640px", boxSizing: "border-box" }}
+                    />
+                    <div className="row" style={{ marginTop: "6px", flexWrap: "wrap", gap: "6px" }}>
+                      {["rule", "policy", "info", "story"].map((x) => (
+                        <button key={x} type="button" className="preset-chip" onClick={() => appendAddLabel(x)}>
+                          + {x}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="row" style={{ alignItems: "center", marginTop: "4px" }}>
                     <label className="inline" style={{ cursor: "pointer" }}>
                       <span style={{ fontWeight: 600 }}>Nạp từ file</span>
@@ -558,6 +611,15 @@
                     </select>
                   </label>
                   <label>
+                    Nhãn (lọc){" "}
+                    <input
+                      value={labelFilter}
+                      onChange={(e) => setLabelFilter(e.target.value)}
+                      placeholder="rule, info…"
+                      style={{ minWidth: "140px" }}
+                    />
+                  </label>
+                  <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
                       <option value="10">10</option>
@@ -581,13 +643,14 @@
                 {inputs.length === 0 ? <div className="empty">Không có input records với filter status: <code>{inputStatusFilter}</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Content</th><th>Status</th><th>Progress</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Progress</th></tr>
                   </thead>
                   <tbody>
                     {inputs.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
                         <td><TierBadge tier={d.memory_tier} /></td>
+                        <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.content?.slice(0, 140)}</td>
                         <td>{d.status}</td>
                         <td>{d.processed_chunks || 0}/{d.total_chunks || 0}</td>
@@ -622,6 +685,15 @@
                     </select>
                   </label>
                   <label>
+                    Nhãn (lọc){" "}
+                    <input
+                      value={labelFilter}
+                      onChange={(e) => setLabelFilter(e.target.value)}
+                      placeholder="rule, info…"
+                      style={{ minWidth: "140px" }}
+                    />
+                  </label>
+                  <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
                       <option value="10">10</option>
@@ -645,13 +717,14 @@
                 {processed.length === 0 ? <div className="empty">Không có processed datapoints với filter status: <code>{processedStatusFilter}</code>. Thử để <code>all</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
                   </thead>
                   <tbody>
                     {processed.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
                         <td><TierBadge tier={d.memory_tier} /></td>
+                        <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.parent_id || "-"}</td>
                         <td>{Number.isInteger(d.chunk_index) ? `${d.chunk_index + 1}/${d.total_chunks || "?"}` : "-"}</td>
                         <td>{d.status}</td>
@@ -731,6 +804,15 @@
                     </select>
                   </label>
                   <label>
+                    Nhãn (lọc){" "}
+                    <input
+                      value={labelFilter}
+                      onChange={(e) => setLabelFilter(e.target.value)}
+                      placeholder="rule, info…"
+                      style={{ minWidth: "140px" }}
+                    />
+                  </label>
+                  <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
                       <option value="10">10</option>
@@ -765,7 +847,7 @@
                 ) : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
+                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
                   </thead>
                   <tbody>
                     {datapoints.map((d) => (
@@ -779,6 +861,7 @@
                           ) : null}
                         </td>
                         <td><TierBadge tier={d.memory_tier} /></td>
+                        <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.content?.slice(0, 120)}</td>
                         <td>
                           <div>{d.status}</div>
@@ -819,6 +902,15 @@
                     </select>
                   </label>
                   <label>
+                    Nhãn (lọc){" "}
+                    <input
+                      value={labelFilter}
+                      onChange={(e) => setLabelFilter(e.target.value)}
+                      placeholder="rule, info…"
+                      style={{ minWidth: "140px" }}
+                    />
+                  </label>
+                  <label>
                     Items/page{" "}
                     <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || 10)}>
                       <option value="10">10</option>
@@ -854,7 +946,7 @@
                 {vectors.length > 0 ? (
                   <table style={{ marginBottom: "12px" }}>
                     <thead>
-                      <tr><th>ID</th><th>Tier (DP)</th><th>Tier (vector)</th><th>Content</th></tr>
+                      <tr><th>ID</th><th>Tier (DP)</th><th>Tier (vector)</th><th>Nhãn</th><th>Content</th></tr>
                     </thead>
                     <tbody>
                       {vectors.map((v) => (
@@ -862,6 +954,7 @@
                           <td>{v.id}</td>
                           <td><TierBadge tier={v.memory_tier} /></td>
                           <td><TierBadge tier={v.vec_tier || v.memory_tier} /></td>
+                          <td><LabelsCell primary={v.primary_label} labels={v.labels} /></td>
                           <td>{v.content?.slice(0, 100)}</td>
                         </tr>
                       ))}
@@ -1004,7 +1097,7 @@
                   <button onClick={runSearch}>Search</button>
                 </div>
                 <p className="muted" style={{ marginTop: "10px" }}>
-                  Kết quả gồm <code>four_tier_stats</code> khi bật 4 tầng; <code>parsed_context</code> có tiêu đề merged tier.
+                  Kết quả gồm <code>four_tier_stats</code> khi bật 4 tầng; <code>parsed_context</code> có tiêu đề merged tier. Nhãn chỉ dùng khi <strong>Add</strong> (phân loại), không lọc theo text search.
                 </p>
                 <pre>{JSON.stringify(searchResult, null, 2)}</pre>
               </div>

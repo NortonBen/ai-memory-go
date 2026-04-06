@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
@@ -127,7 +128,7 @@ func (s *InMemoryStore) SimilaritySearchWithFilter(_ context.Context, queryEmbed
 
 	var candidates []scored
 	for _, emb := range s.embeddings {
-		if !matchesFilters(emb.Metadata, filters) {
+		if !schema.MetadataMatchesVectorSearchFilters(emb.Metadata, filters) {
 			continue
 		}
 		score := cosineSimilarity(queryEmbedding, emb.Embedding)
@@ -232,16 +233,3 @@ func cosineSimilarity(a, b []float32) float64 {
 	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
-// matchesFilters returns true if all filter key-value pairs are present in metadata.
-func matchesFilters(metadata map[string]interface{}, filters map[string]interface{}) bool {
-	if len(filters) == 0 {
-		return true
-	}
-	for k, v := range filters {
-		mv, ok := metadata[k]
-		if !ok || fmt.Sprintf("%v", mv) != fmt.Sprintf("%v", v) {
-			return false
-		}
-	}
-	return true
-}

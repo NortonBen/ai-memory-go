@@ -141,12 +141,7 @@ func (e *defaultMemoryEngine) retrieveContextLegacy(ctx context.Context, query *
 		}
 
 		for _, vr := range vecResults {
-			sourceID := vr.ID
-			if isEntity, ok := vr.Metadata["is_entity"].(bool); ok && isEntity {
-				if sid, ok := vr.Metadata["source_id"].(string); ok {
-					sourceID = sid
-				}
-			}
+			sourceID := vectorResultSourceID(vr)
 
 			if vr.Score > vectorScores[sourceID] {
 				vectorScores[sourceID] = vr.Score

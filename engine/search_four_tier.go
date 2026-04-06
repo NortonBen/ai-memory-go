@@ -136,9 +136,7 @@ func (e *defaultMemoryEngine) retrieveContextFourTier(ctx context.Context, query
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, map[string]interface{}{
-				"memory_tier": schema.MemoryTierGeneral,
-			}, tierLimit, threshold)
+			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, schema.VectorSearchTierFilter(schema.MemoryTierGeneral), tierLimit, threshold)
 			tierOut[0] = tierVecResult{tier: schema.MemoryTierGeneral, hits: hits, err: err}
 			stats.GeneralHitCount = len(hits)
 		}()
@@ -148,9 +146,7 @@ func (e *defaultMemoryEngine) retrieveContextFourTier(ctx context.Context, query
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, map[string]interface{}{
-				"memory_tier": schema.MemoryTierData,
-			}, tierLimit, threshold)
+			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, schema.VectorSearchTierFilter(schema.MemoryTierData), tierLimit, threshold)
 			tierOut[1] = tierVecResult{tier: schema.MemoryTierData, hits: hits, err: err}
 			stats.DataHitCount = len(hits)
 		}()
@@ -160,9 +156,7 @@ func (e *defaultMemoryEngine) retrieveContextFourTier(ctx context.Context, query
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, map[string]interface{}{
-				"memory_tier": schema.MemoryTierStorage,
-			}, tierLimit, threshold)
+			hits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, schema.VectorSearchTierFilter(schema.MemoryTierStorage), tierLimit, threshold)
 			tierOut[2] = tierVecResult{tier: schema.MemoryTierStorage, hits: hits, err: err}
 			stats.StorageHitCount = len(hits)
 			stats.StorageSearched = true
@@ -265,9 +259,7 @@ func (e *defaultMemoryEngine) retrieveContextFourTier(ctx context.Context, query
 	if opts.AutoStorageIfWeak && !includeStorage && maxVec < weakTh {
 		stats.StorageLazyRun = true
 		stats.StorageSearched = true
-		storHits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, map[string]interface{}{
-			"memory_tier": schema.MemoryTierStorage,
-		}, tierLimit*2, threshold)
+		storHits, err := e.vectorStore.SimilaritySearchWithFilter(ctx, branchEmbedding, schema.VectorSearchTierFilter(schema.MemoryTierStorage), tierLimit*2, threshold)
 		if err == nil {
 			for _, vr := range storHits {
 				if vr == nil {
@@ -317,9 +309,10 @@ func (e *defaultMemoryEngine) loadCoreTierDataPoints(ctx context.Context, query 
 		if dp == nil {
 			continue
 		}
-		if schema.MemoryTierFromDataPoint(dp) == schema.MemoryTierCore {
-			out = append(out, dp)
+		if schema.MemoryTierFromDataPoint(dp) != schema.MemoryTierCore {
+			continue
 		}
+		out = append(out, dp)
 	}
 	return out
 }
@@ -328,13 +321,16 @@ func vectorResultSourceID(vr *vector.SimilarityResult) string {
 	if vr == nil {
 		return ""
 	}
-	sourceID := vr.ID
-	if isEntity, ok := vr.Metadata["is_entity"].(bool); ok && isEntity {
+	// Embedding con có ID kiểu "{datapoint-chunk-NNN}-chunk-M" nhưng DataPoint trong DB chỉ là "{id}-chunk-NNN".
+	// Metadata source_id luôn trỏ đúng bản ghi relational để truy hồi nhãn / nội dung.
+	if vr.Metadata != nil {
 		if sid, ok := vr.Metadata["source_id"].(string); ok {
-			sourceID = sid
+			if t := strings.TrimSpace(sid); t != "" {
+				return t
+			}
 		}
 	}
-	return sourceID
+	return vr.ID
 }
 
 func tierVectorMultiplier(tier string) float64 {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/vector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -96,6 +97,33 @@ func TestSQLiteVectorStore_FilterDoesNotLoseValidHits(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "target-b", results[0].ID)
+}
+
+func TestSQLiteVectorStore_LabelsAnyFilterWithTier(t *testing.T) {
+	s := tempVecStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.StoreBatchEmbeddings(ctx, []*vector.EmbeddingData{
+		{ID: "hit", Embedding: []float32{1, 0, 0}, Metadata: map[string]interface{}{
+			"memory_tier":                  schema.MemoryTierGeneral,
+			schema.MetadataKeyLabelsJoined: schema.JoinLabelsForVector([]string{"truyen-x"}),
+		}},
+		{ID: "miss-label", Embedding: []float32{0.99, 0.01, 0}, Metadata: map[string]interface{}{
+			"memory_tier":                  schema.MemoryTierGeneral,
+			schema.MetadataKeyPrimaryLabel: "other",
+		}},
+		{ID: "miss-tier", Embedding: []float32{0.98, 0.02, 0}, Metadata: map[string]interface{}{
+			"memory_tier":                  schema.MemoryTierData,
+			schema.MetadataKeyLabelsJoined: schema.JoinLabelsForVector([]string{"truyen-x"}),
+		}},
+	}))
+	f := map[string]interface{}{
+		"memory_tier":                   schema.MemoryTierGeneral,
+		schema.VectorFilterKeyLabelsAny: []string{"truyen-x"},
+	}
+	results, err := s.SimilaritySearchWithFilter(ctx, []float32{1, 0, 0}, f, 5, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "hit", results[0].ID)
 }
 
 func TestSQLiteVectorStore_RejectsWrongDimensions(t *testing.T) {

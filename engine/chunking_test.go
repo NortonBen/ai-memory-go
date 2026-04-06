@@ -137,3 +137,54 @@ func TestCognifyTaskChunking(t *testing.T) {
 		t.Errorf("Expected many child chunk datapoints, got %d", childCount)
 	}
 }
+
+func TestCognifyParentSplitInheritsLabelsOnAllChunkChildren(t *testing.T) {
+	story := "mục thần ký"
+	content := strings.Repeat("Một đoạn truyện ngắn. ", 120)
+	if len(content) < 800 {
+		t.Fatal("content too short")
+	}
+
+	dp := &schema.DataPoint{
+		ID:               "root-input",
+		Content:          content,
+		ContentType:      "text",
+		SessionID:        "session-labels",
+		ProcessingStatus: schema.StatusPending,
+		Metadata: map[string]interface{}{
+			"memory_tier": schema.MemoryTierGeneral,
+			schema.MetadataKeyMemoryLabels: schema.LabelsToMetadataSlice([]string{story}),
+			schema.MetadataKeyPrimaryLabel: story,
+			schema.MetadataKeyLabelsJoined: schema.JoinLabelsForVector([]string{story}),
+		},
+	}
+
+	ext := &counterExtractor{}
+	emb := &mockEmbedder{}
+	store := newMockStorage()
+	graphStore, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+	vecStore, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory})
+
+	task := &CognifyTask{DataPoint: dp, ConsistencyThreshold: 0}
+	if err := task.Execute(context.Background(), ext, emb, store, graphStore, vecStore, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for _, stored := range store.dataPoints {
+		if stored.Metadata == nil {
+			continue
+		}
+		if isChunk, _ := stored.Metadata["is_chunk"].(bool); !isChunk {
+			continue
+		}
+		if parentID, _ := stored.Metadata["parent_id"].(string); parentID != dp.ID {
+			continue
+		}
+		if !schema.DataPointHasAnyLabel(stored, []string{story}) {
+			t.Errorf("child %s missing label %q: labels=%v primary=%v",
+				stored.ID, story,
+				schema.LabelsFromMetadata(stored.Metadata),
+				stored.Metadata[schema.MetadataKeyPrimaryLabel])
+		}
+	}
+}

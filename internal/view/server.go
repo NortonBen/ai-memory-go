@@ -191,6 +191,16 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 		}
 		results = filtered
 	}
+	if tag := strings.TrimSpace(r.URL.Query().Get("label")); tag != "" {
+		want := schema.NormalizeLabel(tag)
+		filtered := make([]*schema.DataPoint, 0, len(results))
+		for _, dp := range results {
+			if schema.DataPointHasAnyLabel(dp, []string{want}) {
+				filtered = append(filtered, dp)
+			}
+		}
+		results = filtered
+	}
 
 	includeVectors := strings.EqualFold(r.URL.Query().Get("include_vectors"), "true")
 	total := len(results)
@@ -212,12 +222,20 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 
 		itemType := dataPointKind(dp)
 
+		primary := ""
+		if dp.Metadata != nil {
+			if p, ok := dp.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok {
+				primary = p
+			}
+		}
 		card := map[string]interface{}{
 			"id":               dp.ID,
 			"session_id":       dp.SessionID,
 			"type":             dp.ContentType,
 			"item_type":        itemType,
 			"memory_tier":      schema.MemoryTierFromDataPoint(dp),
+			"labels":           schema.LabelsFromMetadata(dp.Metadata),
+			"primary_label":    primary,
 			"status":           dp.ProcessingStatus,
 			"content":          dp.Content,
 			"created_at":       dp.CreatedAt,
@@ -446,6 +464,16 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 		}
 		results = filtered
 	}
+	if tag := strings.TrimSpace(r.URL.Query().Get("label")); tag != "" {
+		want := schema.NormalizeLabel(tag)
+		filtered := make([]*schema.DataPoint, 0, len(results))
+		for _, dp := range results {
+			if schema.DataPointHasAnyLabel(dp, []string{want}) {
+				filtered = append(filtered, dp)
+			}
+		}
+		results = filtered
+	}
 
 	// IMPORTANT: filter by available embeddings first, then paginate.
 	// If we paginate before filtering, large batches of pending chunks can make
@@ -467,13 +495,21 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 					vecTier = s
 				}
 			}
+			primary := ""
+			if dp.Metadata != nil {
+				if p, ok := dp.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok {
+					primary = p
+				}
+			}
 			items = append(items, map[string]interface{}{
-				"id":          dp.ID,
-				"session_id":  dp.SessionID,
-				"content":     dp.Content,
-				"memory_tier": schema.MemoryTierFromDataPoint(dp),
-				"vec_tier":    vecTier,
-				"vector":      v,
+				"id":            dp.ID,
+				"session_id":    dp.SessionID,
+				"content":       dp.Content,
+				"memory_tier":   schema.MemoryTierFromDataPoint(dp),
+				"vec_tier":      vecTier,
+				"labels":        schema.LabelsFromMetadata(dp.Metadata),
+				"primary_label": primary,
+				"vector":        v,
 			})
 		}
 		totalAvailable++
@@ -552,10 +588,11 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Content   string `json:"content"`
-		SessionID string `json:"session_id"`
-		Tier      string `json:"tier"`
-		Cognify   bool   `json:"cognify"`
+		Content   string   `json:"content"`
+		SessionID string   `json:"session_id"`
+		Tier      string   `json:"tier"`
+		Cognify   bool     `json:"cognify"`
+		Labels    []string `json:"labels"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -576,6 +613,9 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.Tier) != "" {
 		opts = append(opts, engine.WithMemoryTier(body.Tier))
 	}
+	if len(body.Labels) > 0 {
+		opts = append(opts, engine.WithLabels(body.Labels...))
+	}
 	dp, err := s.deps.Engine.Add(ctx, content, opts...)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -586,12 +626,24 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"ok":        true,
-		"id":        dp.ID,
-		"session_id": dp.SessionID,
-		"memory_tier": schema.MemoryTierFromDataPoint(dp),
+		"ok":             true,
+		"id":             dp.ID,
+		"session_id":     dp.SessionID,
+		"memory_tier":    schema.MemoryTierFromDataPoint(dp),
+		"labels":        schema.LabelsFromMetadata(dp.Metadata),
+		"primary_label": primaryLabelFromDP(dp),
 		"cognify_queued": body.Cognify,
 	})
+}
+
+func primaryLabelFromDP(dp *schema.DataPoint) string {
+	if dp == nil || dp.Metadata == nil {
+		return ""
+	}
+	if p, ok := dp.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok {
+		return p
+	}
+	return ""
 }
 
 func queryBool(r *http.Request, key string) bool {
@@ -612,7 +664,7 @@ type thinkRequest struct {
 	IncludeReasoning   bool                         `json:"include_reasoning"`
 	MaxContextLength   int                          `json:"max_context_length"`
 	SegmentContext     bool                         `json:"segment_context"`
-	FourTier           *schema.FourTierSearchOptions `json:"four_tier,omitempty"`
+	FourTier *schema.FourTierSearchOptions `json:"four_tier,omitempty"`
 }
 
 func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
@@ -654,7 +706,7 @@ func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
 		IncludeReasoning:   req.IncludeReasoning,
 		MaxContextLength:   req.MaxContextLength,
 		SegmentContext:     req.SegmentContext,
-		FourTier:           req.FourTier,
+		FourTier: req.FourTier,
 	}
 	if tq.MaxThinkingSteps <= 0 && tq.EnableThinking {
 		tq.MaxThinkingSteps = 3

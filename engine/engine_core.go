@@ -115,16 +115,30 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 		}
 	}
 
+	metaLabels := schema.NormalizeLabels(options.Labels)
+	if options.Metadata != nil {
+		metaLabels = append(metaLabels, schema.LabelsFromMetadata(options.Metadata)...)
+		metaLabels = schema.NormalizeLabels(metaLabels)
+	}
+
 	candidateTier := schema.MemoryTierGeneral
+	explicitTier := false
 	if strings.TrimSpace(options.MemoryTier) != "" {
 		candidateTier = schema.NormalizeMemoryTier(options.MemoryTier)
+		explicitTier = true
 	} else if options.Metadata != nil {
 		if v, ok := options.Metadata["memory_tier"].(string); ok && strings.TrimSpace(v) != "" {
 			candidateTier = schema.NormalizeMemoryTier(v)
+			explicitTier = true
+		}
+	}
+	if !explicitTier {
+		if t := schema.DefaultMemoryTierFromLabels(metaLabels); t != "" {
+			candidateTier = t
 		}
 	}
 
-	// Deduplication: Check if this exact content already exists for this session (cùng memory_tier).
+	// Deduplication: Check if this exact content already exists for this session (cùng memory_tier + cùng tập nhãn).
 	searchQuery := &storage.DataPointQuery{
 		SearchText: content,
 		SearchMode: "exact",
@@ -138,6 +152,9 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 			if existing != nil && existing.Metadata != nil {
 				if isInput, ok := existing.Metadata["is_input"].(bool); ok && isInput {
 					if schema.MemoryTierFromDataPoint(existing) != candidateTier {
+						continue
+					}
+					if !schema.LabelSetsEqual(metaLabels, schema.LabelsFromMetadata(existing.Metadata)) {
 						continue
 					}
 					return existing, nil
@@ -163,6 +180,11 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 	dp.Metadata["is_input"] = true
 	dp.Metadata["is_chunk"] = false
 	dp.Metadata["memory_tier"] = candidateTier
+	if len(metaLabels) > 0 {
+		dp.Metadata[schema.MetadataKeyMemoryLabels] = schema.LabelsToMetadataSlice(metaLabels)
+		dp.Metadata[schema.MetadataKeyPrimaryLabel] = metaLabels[0]
+		dp.Metadata[schema.MetadataKeyLabelsJoined] = schema.JoinLabelsForVector(metaLabels)
+	}
 
 	// Persist the initial pending DataPoint
 	err := e.store.StoreDataPoint(ctx, dp)

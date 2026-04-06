@@ -10,6 +10,21 @@ import (
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
+func TestVectorResultSourceIDPrefersMetadataSourceID(t *testing.T) {
+	vr := &vector.SimilarityResult{
+		ID: "root-chunk-000-chunk-1",
+		Metadata: map[string]interface{}{
+			"source_id": "root-chunk-000",
+		},
+	}
+	if got := vectorResultSourceID(vr); got != "root-chunk-000" {
+		t.Fatalf("got %q, want root-chunk-000", got)
+	}
+	if got := vectorResultSourceID(&vector.SimilarityResult{ID: "only-id", Metadata: nil}); got != "only-id" {
+		t.Fatalf("fallback vr.ID: got %q", got)
+	}
+}
+
 func TestUseFourTierSearchOverride(t *testing.T) {
 	enabled := true
 	disabled := false

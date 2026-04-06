@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	addFile string
-	addURL  string
-	addTier string
+	addFile   string
+	addURL    string
+	addTier   string
+	addLabels string
 )
 
 var addCmd = &cobra.Command{
@@ -74,6 +75,17 @@ var addCmd = &cobra.Command{
 		if strings.TrimSpace(addTier) != "" {
 			addOpts = append(addOpts, engine.WithMemoryTier(addTier))
 		}
+		if strings.TrimSpace(addLabels) != "" {
+			var labs []string
+			for _, p := range strings.Split(addLabels, ",") {
+				if t := strings.TrimSpace(p); t != "" {
+					labs = append(labs, t)
+				}
+			}
+			if len(labs) > 0 {
+				addOpts = append(addOpts, engine.WithLabels(labs...))
+			}
+		}
 		dp, err := eng.Add(ctx, content, addOpts...)
 		if err != nil {
 			color.Red("Error adding memory: %v", err)
@@ -89,4 +101,5 @@ func init() {
 	addCmd.Flags().StringVar(&addFile, "file", "", "read content from file")
 	addCmd.Flags().StringVar(&addURL, "url", "", "read content from URL")
 	addCmd.Flags().StringVar(&addTier, "tier", "", "memory partition: core, general, data, storage")
+	addCmd.Flags().StringVar(&addLabels, "labels", "", "comma-separated classification labels (rule,policy,story-name,...); not used for search filtering")
 }

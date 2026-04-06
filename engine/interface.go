@@ -28,6 +28,8 @@ type AddOptions struct {
 	// MemoryTier phân vùng 4 tầng (core / general / data / storage). Ghi vào metadata memory_tier;
 	// ưu tiên hơn memory_tier trong WithMetadata nếu cả hai được đặt.
 	MemoryTier string
+	// Labels phân loại nội dung khi lưu (rule, policy, tên truyện…). Ghi memory_labels + primary_label; rule/policy → tier core nếu không chỉ định tier. Không dùng để lọc Search.
+	Labels []string
 }
 
 // AddOption configures AddOptions
@@ -73,6 +75,13 @@ func WithMemoryTier(tier string) AddOption {
 	}
 }
 
+// WithLabels gắn nhãn phân loại khi Add. Có thể kết hợp WithMemoryTier.
+func WithLabels(labels ...string) AddOption {
+	return func(o *AddOptions) {
+		o.Labels = append(o.Labels, labels...)
+	}
+}
+
 // CognifyOptions holds optional parameters for the Cognify operation
 type CognifyOptions struct {
 	WaitUntilComplete bool
@@ -110,7 +119,9 @@ type RequestOptions struct {
 	EnableThinking     bool
 	MaxThinkingSteps   int
 	LearnRelationships bool
-	IncludeReasoning   bool
+	IncludeReasoning bool
+	// FourTier ghi đè tìm kiếm 4 tầng cho bước Think (nil = theo cấu hình engine).
+	FourTier *schema.FourTierSearchOptions
 }
 
 // RequestOption configures RequestOptions
@@ -160,6 +171,13 @@ func WithLearnRelationships(learn bool) RequestOption {
 func WithIncludeReasoning(include bool) RequestOption {
 	return func(o *RequestOptions) {
 		o.IncludeReasoning = include
+	}
+}
+
+// WithRequestFourTier ghi đè bốn tầng cho bước Think trong Request.
+func WithRequestFourTier(ft *schema.FourTierSearchOptions) RequestOption {
+	return func(o *RequestOptions) {
+		o.FourTier = ft
 	}
 }
 

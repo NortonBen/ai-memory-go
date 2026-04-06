@@ -7,15 +7,17 @@ import (
 	"strings"
 
 	"github.com/NortonBen/ai-memory-go/engine"
+	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	requestHopDepth    int
-	requestIncludeRsn  bool
-	requestLearnRels   bool
+	requestHopDepth   int
+	requestIncludeRsn bool
+	requestLearnRels  bool
+	requestFourTier   bool
 )
 
 var requestCmd = &cobra.Command{
@@ -40,6 +42,10 @@ var requestCmd = &cobra.Command{
 			engine.WithEnableThinking(true),
 			engine.WithIncludeReasoning(requestIncludeRsn),
 			engine.WithLearnRelationships(requestLearnRels),
+		}
+		if requestFourTier {
+			en := true
+			opts = append(opts, engine.WithRequestFourTier(&schema.FourTierSearchOptions{Enabled: &en}))
 		}
 
 		resp, err := eng.Request(ctx, sessionID, message, opts...)
@@ -88,4 +94,5 @@ func init() {
 	requestCmd.Flags().IntVarP(&requestHopDepth, "hop-depth", "d", 2, "number of graph hops to explore during retrieval")
 	requestCmd.Flags().BoolVarP(&requestIncludeRsn, "reasoning", "r", true, "display reasoning steps")
 	requestCmd.Flags().BoolVar(&requestLearnRels, "learn", true, "enable automatic learning of new bridging relationships")
+	requestCmd.Flags().BoolVar(&requestFourTier, "four-tier", false, "enable four-tier retrieval for query intent (overrides engine default off)")
 }

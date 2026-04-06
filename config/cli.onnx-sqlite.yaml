@@ -15,7 +15,7 @@
 # Cần ONNX Runtime (ví dụ macOS: brew install onnxruntime).
 
 db:
-  datadir: data/cli_sqlite
+  datadir: data/cli_sqlite_label
   vector:
     provider: sqlite
   graph:

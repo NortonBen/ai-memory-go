@@ -237,12 +237,13 @@ JSON Response:`, jsonFormatRequirement, historyBuffer, currentStepContext, query
 					}
 				}
 
-				if e.embedder != nil && e.vectorStore != nil {
+				if e.embedder != nil && e.vectorStore != nil && e.store != nil {
 					emb, err := e.embedder.GenerateEmbedding(ctx, entityName)
 					if err == nil {
 						vecResults, _ := e.vectorStore.SimilaritySearch(ctx, emb, 2, 0.45)
 						for _, vr := range vecResults {
-							if dp, err := e.store.GetDataPoint(ctx, vr.ID); err == nil && dp != nil {
+							sid := vectorResultSourceID(vr)
+							if dp, err := e.store.GetDataPoint(ctx, sid); err == nil && dp != nil {
 								additionalContext.WriteString(fmt.Sprintf("- Memory: %s\n", dp.Content))
 							}
 						}

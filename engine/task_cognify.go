@@ -62,6 +62,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 			childID := fmt.Sprintf("%s-chunk-%03d", t.DataPoint.ID, i)
 
 			childMeta := copyMetadata(t.DataPoint.Metadata)
+			ensureChunkInheritsLabels(childMeta, t.DataPoint)
 			childMeta["is_chunk"] = true
 			childMeta["is_input"] = false
 			childMeta["parent_id"] = t.DataPoint.ID
@@ -171,7 +172,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 			if vectorStore != nil {
 				chunkID := fmt.Sprintf("%s-chunk-%d", t.DataPoint.ID, i)
 				tier := schema.MemoryTierFromDataPoint(t.DataPoint)
-				if storeErr := vectorStore.StoreEmbedding(gctx, chunkID, embedding, map[string]interface{}{
+				meta := map[string]interface{}{
 					"content_type": t.DataPoint.ContentType,
 					"session_id":   t.DataPoint.SessionID,
 					"user_id":      t.DataPoint.UserID,
@@ -179,7 +180,18 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 					"chunk_index":  i,
 					"is_chunk":     true,
 					"memory_tier":  tier,
-				}); storeErr != nil {
+				}
+				if t.DataPoint.Metadata != nil {
+					if j := schema.JoinLabelsForVector(schema.LabelsFromMetadata(t.DataPoint.Metadata)); j != "" {
+						meta[schema.MetadataKeyLabelsJoined] = j
+					}
+					if p, ok := t.DataPoint.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok {
+						if n := schema.NormalizeLabel(p); n != "" {
+							meta[schema.MetadataKeyPrimaryLabel] = n
+						}
+					}
+				}
+				if storeErr := vectorStore.StoreEmbedding(gctx, chunkID, embedding, meta); storeErr != nil {
 					log.Printf("failed to store chunk embedding %d in vectorStore: %v", i, storeErr)
 				}
 			}
@@ -240,13 +252,24 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 		// Store Document (Average) Embedding if not already stored (for root DP)
 		if vectorStore != nil && len(chunks) > 0 {
 			docTier := schema.MemoryTierFromDataPoint(t.DataPoint)
-			err = vectorStore.StoreEmbedding(ctx, t.DataPoint.ID, avgEmb, map[string]interface{}{
+			dmeta := map[string]interface{}{
 				"content_type": t.DataPoint.ContentType,
 				"session_id":   t.DataPoint.SessionID,
 				"user_id":      t.DataPoint.UserID,
 				"is_document":  true,
 				"memory_tier":  docTier,
-			})
+			}
+			if t.DataPoint.Metadata != nil {
+				if j := schema.JoinLabelsForVector(schema.LabelsFromMetadata(t.DataPoint.Metadata)); j != "" {
+					dmeta[schema.MetadataKeyLabelsJoined] = j
+				}
+				if p, ok := t.DataPoint.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok {
+					if n := schema.NormalizeLabel(p); n != "" {
+						dmeta[schema.MetadataKeyPrimaryLabel] = n
+					}
+				}
+			}
+			err = vectorStore.StoreEmbedding(ctx, t.DataPoint.ID, avgEmb, dmeta)
 		}
 	}
 
@@ -312,6 +335,26 @@ func copyMetadata(meta map[string]interface{}) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+// ensureChunkInheritsLabels ghi lại memory_labels / primary / labels_joined từ parent
+// (slice mới, tránh alias; đủ cả khi chỉ có primary_label).
+func ensureChunkInheritsLabels(childMeta map[string]interface{}, parent *schema.DataPoint) {
+	if childMeta == nil || parent == nil {
+		return
+	}
+	labs := schema.LabelsFromMetadata(parent.Metadata)
+	if len(labs) == 0 && parent.Metadata != nil {
+		if p, ok := parent.Metadata[schema.MetadataKeyPrimaryLabel].(string); ok && strings.TrimSpace(p) != "" {
+			labs = schema.NormalizeLabels([]string{p})
+		}
+	}
+	if len(labs) == 0 {
+		return
+	}
+	childMeta[schema.MetadataKeyMemoryLabels] = schema.LabelsToMetadataSlice(labs)
+	childMeta[schema.MetadataKeyPrimaryLabel] = labs[0]
+	childMeta[schema.MetadataKeyLabelsJoined] = schema.JoinLabelsForVector(labs)
 }
 
 func syncParentStatusFromChildren(ctx context.Context, store storage.Storage, parent *schema.DataPoint) error {
