@@ -27,6 +27,36 @@ Go library for persistent knowledge-graph + vector memory for AI agents, with a 
 - Hybrid storage: **graph** adapters (in-memory, SQLite, Redis, Neo4j), **vector** (SQLite + sqlite-vec, Qdrant, …), **relational** (SQLite, PostgreSQL).
 - Optional **`view`** command serves a small web UI (`internal/view`).
 
+## Labels and four-tier retrieval
+
+### Labels (classification metadata)
+
+- Add labels at ingest with CLI `add --labels "rule,policy,story-name"` or MCP `memory_add` argument `labels`.
+- Labels are normalized and stored in datapoint metadata (`memory_labels`, `primary_label`, `labels_joined`), and are inherited by chunk children during Cognify.
+- Labels are for classification and downstream context, **not** an explicit search filter.
+- If no explicit tier is provided, labels like `rule` / `policy` can auto-default the datapoint to the `core` memory tier.
+- If you need strict tier placement, always pass `--tier` (CLI) or `tier` (MCP), which takes precedence.
+
+### Four-tier retrieval
+
+- Four-tier retrieval merges signals across memory tiers (`core`, `general`, `data`, optional `storage`) plus legacy vector fallback.
+- **Tier 1 — `core`**: high-priority memory (rules, policies, durable constraints). This tier gets stronger weighting in ranking and is intended for "must not forget" context.
+- **Tier 2 — `general`**: default working knowledge and normal conversational memory.
+- **Tier 3 — `data`**: supporting facts/reference material; useful context but lower priority than `core` and `general`.
+- **Tier 4 — `storage` (optional)**: colder/archival memory; can be excluded by default and pulled in when enabled or when weak top scores trigger storage fallback.
+- In CLI, enable per request via `request --four-tier` (query-intent retrieval path).
+- In MCP, enable per call with `four_tier=true` on `memory_request` and `memory_think`.
+- Engine-level defaults live in `engine.EngineConfig.FourTier`; per-query options can override this default.
+- Current CLI YAML init path (`internal/cli/initRuntime`) does not yet map full engine four-tier knobs from `~/.ai-memory.yaml`; use the Go API for advanced tuning.
+
+### Session scopes (global vs named)
+
+- **Named session (riêng)**: session có tên như `default`, `project-a`, `customer-x`; dữ liệu lưu với `session_id="<name>"`.
+- **Global/shared pool**: dùng keyword `global`, `shared`, hoặc `_` khi add để lưu bản ghi dùng chung với `session_id` rỗng.
+- Search/Think/Request luôn chạy trên một engine context có tên (mặc định `default`) và tự gộp thêm dữ liệu global/shared.
+- Trong CLI: `-s <name>` để dùng session riêng; `-s global` để add vào shared pool (chat/search context vẫn map về `default`).
+- Trong MCP: `memory_add` hỗ trợ `global=true` hoặc `session_id="<name>"`; `memory_search` / `memory_think` / `memory_request` hỗ trợ `session_id` để ghi đè ngữ cảnh truy vấn.
+
 ## Library quick start
 
 ```bash

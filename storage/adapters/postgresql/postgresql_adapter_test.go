@@ -351,3 +351,67 @@ func TestPostgresAdapter_SearchAndQueryBranches(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestPostgresAdapter_QueryAdvancedBranches(t *testing.T) {
+	a, mock, cleanup := newMockAdapter(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := time.Now()
+	after := now.Add(-time.Hour)
+	cols := []string{"id", "content", "content_type", "metadata", "session_id", "user_id", "created_at", "updated_at", "processing_status", "error_message", "nodes", "edges"}
+
+	// IncludeGlobalSession + exact search + created_after + sort by id asc
+	q1 := storage.DefaultDataPointQuery()
+	q1.SessionID = "s1"
+	q1.IncludeGlobalSession = true
+	q1.UserID = "u1"
+	q1.ContentType = "text"
+	q1.SearchText = "exact-value"
+	q1.SearchMode = "exact"
+	q1.CreatedAfter = &after
+	q1.SortBy = "id"
+	q1.SortOrder = "asc"
+
+	mock.ExpectQuery("FROM datapoints WHERE 1=1 AND \\(session_id = \\$1 OR session_id IS NULL OR session_id = ''\\) AND user_id = \\$2 AND content_type = \\$3 AND content = \\$4 AND created_at > \\$5").
+		WithArgs("s1", "u1", "text", "exact-value", after).
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow("b", "exact-value", "text", []byte(`{}`), "s1", "u1", now, now.Add(2*time.Minute), schema.StatusCompleted, "", []byte("[]"), []byte("[]")).
+			AddRow("a", "exact-value", "text", []byte(`{}`), "s1", "u1", now, now.Add(1*time.Minute), schema.StatusCompleted, "", []byte("[]"), []byte("[]")))
+	mock.ExpectQuery("FROM input_datapoints WHERE 1=1 AND \\(session_id = \\$1 OR session_id IS NULL OR session_id = ''\\) AND user_id = \\$2 AND content_type = \\$3 AND content = \\$4 AND created_at > \\$5").
+		WithArgs("s1", "u1", "text", "exact-value", after).
+		WillReturnRows(sqlmock.NewRows(cols))
+
+	got1, err := a.QueryDataPoints(ctx, q1)
+	require.NoError(t, err)
+	require.Len(t, got1, 2)
+	require.Equal(t, "a", got1[0].ID)
+	require.Equal(t, "b", got1[1].ID)
+
+	// UnscopedSessionOnly + sort by updated_at desc + limit
+	q2 := storage.DefaultDataPointQuery()
+	q2.UnscopedSessionOnly = true
+	q2.SortBy = "updated_at"
+	q2.SortOrder = "desc"
+	q2.Limit = 1
+
+	mock.ExpectQuery("FROM datapoints WHERE 1=1 AND \\(session_id IS NULL OR session_id = ''\\)").
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow("x", "c1", "text", []byte(`{}`), "", "u1", now, now.Add(1*time.Minute), schema.StatusCompleted, "", []byte("[]"), []byte("[]")))
+	mock.ExpectQuery("FROM input_datapoints WHERE 1=1 AND \\(session_id IS NULL OR session_id = ''\\)").
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow("y", "c2", "text", []byte(`{}`), "", "u1", now, now.Add(3*time.Minute), schema.StatusCompleted, "", []byte("[]"), []byte("[]")))
+
+	got2, err := a.QueryDataPoints(ctx, q2)
+	require.NoError(t, err)
+	require.Len(t, got2, 1)
+	require.Equal(t, "y", got2[0].ID)
+
+	// Metadata unmarshal error branch
+	mock.ExpectQuery("FROM datapoints WHERE 1=1").
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow("bad", "oops", "text", []byte("{invalid json"), "s1", "u1", now, now, schema.StatusCompleted, "", []byte("[]"), []byte("[]")))
+	_, err = a.QueryDataPoints(ctx, storage.DefaultDataPointQuery())
+	require.Error(t, err)
+
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
