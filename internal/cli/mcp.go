@@ -49,14 +49,14 @@ func init() {
 
 func runMCPServer(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
-	eng, err := InitEngine(ctx)
+	runtime, err := initRuntime(ctx)
 	if err != nil {
-		color.Red("Không khởi tạo engine: %v", err)
+		color.Red("Không khởi tạo runtime: %v", err)
 		os.Exit(1)
 	}
-	defer eng.Close()
+	defer runtime.Engine.Close()
 
-	mcpSrv := newMemoryMCPServer(eng)
+	mcpSrv := newMemoryMCPServer(runtime.Engine, runtime.GraphStore)
 
 	switch strings.ToLower(strings.TrimSpace(mcpTransport)) {
 	case "stdio", "":
@@ -95,7 +95,7 @@ func trimListenForLog(addr string) string {
 	return addr
 }
 
-func newMemoryMCPServer(eng engine.MemoryEngine) *server.MCPServer {
+func newMemoryMCPServer(eng engine.MemoryEngine, graphStore graphQueryStore) *server.MCPServer {
 	srv := server.NewMCPServer(
 		"github.com/NortonBen/ai-memory-go/mcp",
 		"0.1.0",
@@ -162,12 +162,12 @@ func newMemoryMCPServer(eng engine.MemoryEngine) *server.MCPServer {
 		}
 		_, cognifyErr := eng.Cognify(ctx, dp, engine.WithWaitCognify(true))
 		out := map[string]any{
-			"id":                 dp.ID,
-			"session_id":         dp.SessionID,
-			"created_at":         dp.CreatedAt,
-			"processing_status":  dp.ProcessingStatus,
-			"cognify_completed":  cognifyErr == nil,
-			"cognify_error":      errStr(cognifyErr),
+			"id":                dp.ID,
+			"session_id":        dp.SessionID,
+			"created_at":        dp.CreatedAt,
+			"processing_status": dp.ProcessingStatus,
+			"cognify_completed": cognifyErr == nil,
+			"cognify_error":     errStr(cognifyErr),
 		}
 		return mcp.NewToolResultJSON(out)
 	})
@@ -286,7 +286,104 @@ func newMemoryMCPServer(eng engine.MemoryEngine) *server.MCPServer {
 		return mcp.NewToolResultJSON(out)
 	})
 
+	graphQueryTool := mcp.NewTool("memory_graph_query",
+		mcp.WithDescription("Truy vấn subgraph theo entity name hoặc node_id."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithString("entity", mcp.Description("Tên thực thể (tìm theo contains ở thuộc tính name).")),
+		mcp.WithString("node_id", mcp.Description("ID node làm seed trực tiếp.")),
+		mcp.WithString("node_type", mcp.Description("Lọc seed theo NodeType khi dùng entity.")),
+		mcp.WithNumber("depth", mcp.Description("Độ sâu graph traversal"), mcp.DefaultNumber(2)),
+		mcp.WithNumber("limit", mcp.Description("Giới hạn số node trả về"), mcp.DefaultNumber(50)),
+		mcp.WithString("session_id", mcp.Description("Lọc theo session; để trống dùng session hiện tại CLI")),
+	)
+	srv.AddTool(graphQueryTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if graphStore == nil {
+			return mcp.NewToolResultError("graph store chưa được cấu hình"), nil
+		}
+		args := req.GetArguments()
+		entity := argString(args, "entity")
+		nodeID := argString(args, "node_id")
+		if entity == "" && nodeID == "" {
+			return mcp.NewToolResultError("cần entity hoặc node_id"), nil
+		}
+		depth := argInt(args, "depth", 2)
+		if depth <= 0 {
+			depth = 2
+		}
+		limit := argInt(args, "limit", 50)
+		if limit <= 0 {
+			limit = 50
+		}
+		sessionID := argString(args, "session_id")
+		if sessionID == "" {
+			sessionID = GetSessionID()
+		}
+
+		seeds, qErr := resolveGraphSeedNodes(ctx, graphStore, entity, nodeID, argString(args, "node_type"), sessionID)
+		if qErr != nil {
+			return mcp.NewToolResultError(qErr.Error()), nil
+		}
+		if len(seeds) == 0 {
+			return mcp.NewToolResultJSON(map[string]any{
+				"query":      entity,
+				"node_id":    nodeID,
+				"session_id": sessionID,
+				"depth":      depth,
+				"nodes":      []*schema.Node{},
+				"seed_count": 0,
+				"node_count": 0,
+			})
+		}
+
+		nodesByID := make(map[string]*schema.Node)
+		for _, seed := range seeds {
+			nodesByID[seed.ID] = seed
+			neighbors, trErr := graphStore.TraverseGraph(ctx, seed.ID, depth, nil)
+			if trErr != nil {
+				continue
+			}
+			for _, n := range filterNodesBySession(neighbors, sessionID) {
+				nodesByID[n.ID] = n
+			}
+		}
+		nodes := mapValues(nodesByID)
+		if len(nodes) > limit {
+			nodes = nodes[:limit]
+		}
+		return mcp.NewToolResultJSON(map[string]any{
+			"query":      entity,
+			"node_id":    nodeID,
+			"session_id": sessionID,
+			"depth":      depth,
+			"nodes":      nodes,
+			"seed_count": len(seeds),
+			"node_count": len(nodes),
+		})
+	})
+
 	return srv
+}
+
+type graphQueryStore interface {
+	GetNode(ctx context.Context, nodeID string) (*schema.Node, error)
+	FindNodesByType(ctx context.Context, nodeType schema.NodeType) ([]*schema.Node, error)
+	FindNodesByEntity(ctx context.Context, entityName string, entityType schema.NodeType) ([]*schema.Node, error)
+	TraverseGraph(ctx context.Context, startNodeID string, depth int, filters map[string]interface{}) ([]*schema.Node, error)
+}
+
+func resolveGraphSeedNodes(ctx context.Context, store graphQueryStore, entity string, nodeID string, nodeType string, sessionID string) ([]*schema.Node, error) {
+	if nodeID != "" {
+		n, err := store.GetNode(ctx, nodeID)
+		if err != nil || n == nil {
+			return nil, nil
+		}
+		return filterNodesBySession([]*schema.Node{n}, sessionID), nil
+	}
+	seeds, err := findSeedNodes(ctx, store, entity, nodeType)
+	if err != nil {
+		return nil, err
+	}
+	return filterNodesBySession(seeds, sessionID), nil
 }
 
 func addOptionsFromMCPArgs(args map[string]any) ([]engine.AddOption, error) {

@@ -51,6 +51,7 @@ Global flags: `--config`, `-s` / `--session`, `-v` / `--verbose`, `-f` / `--form
 | `add` | Add content to memory |
 | `cognify` | Run Cognify on a datapoint |
 | `search` | Semantic / graph / hybrid retrieval (per config) |
+| `graph` | Direct graph subgraph query (`graph query <entity>`) |
 | `think` | Multi-step reasoning over graph / context |
 | `request` | Conversational flow (intent, memory updates, answer) |
 | `delete` | Delete by id or wipe a session |
@@ -65,6 +66,13 @@ Global flags: `--config`, `-s` / `--session`, `-v` / `--verbose`, `-f` / `--form
 ```bash
 ./ai-memory-cli mcp --transport stdio
 ./ai-memory-cli mcp --transport http --listen :8080 --path /mcp
+```
+
+**Graph query examples**
+
+```bash
+./ai-memory-cli graph query "OpenAI" --depth 2
+./ai-memory-cli graph query "NortonBen" --node-type Person --limit 100
 ```
 
 ## Configuration (`~/.ai-memory.yaml`)

@@ -21,6 +21,7 @@ import (
 type CognifyTask struct {
 	DataPoint            *schema.DataPoint
 	ConsistencyThreshold float32
+	WaitUntilComplete    bool
 }
 
 // Parent split từng giới hạn trySubmit 64 task trong worker đang chạy — phần còn lại
@@ -100,7 +101,23 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 		// can deadlock the parent split phase (e.g. >1000 child chunks).
 		// Không Submit từ chính worker đang chạy task parent (dễ deadlock khi queue đầy).
 		// Goroutine nối lần lượt từng CognifyTask — Submit block khi buffer đầy cho tới khi worker khác xử lý.
-		if wp != nil && len(createdChildren) > 0 {
+		if len(createdChildren) > 0 && t.WaitUntilComplete {
+			// Synchronous mode: process child chunks inline so WithWaitCognify(true)
+			// really waits until graph extraction/memify completes.
+			for _, child := range createdChildren {
+				childTask := &CognifyTask{
+					DataPoint:            child,
+					ConsistencyThreshold: t.ConsistencyThreshold,
+					WaitUntilComplete:    true,
+				}
+				if err := childTask.Execute(ctx, ext, emb, store, graphStore, vectorStore, wp); err != nil {
+					return t.fail(ctx, store, fmt.Errorf("failed to process child chunk %s: %w", child.ID, err))
+				}
+			}
+			if err := syncParentStatusFromChildren(ctx, store, t.DataPoint); err != nil {
+				log.Printf("failed to sync parent status for %s: %v", t.DataPoint.ID, err)
+			}
+		} else if wp != nil && len(createdChildren) > 0 {
 			children := append([]*schema.DataPoint(nil), createdChildren...)
 			th := t.ConsistencyThreshold
 			pid := t.DataPoint.ID
@@ -275,6 +292,7 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 
 	t.DataPoint.Nodes = allNodes
 	t.DataPoint.Edges = allEdges
+	normalizeExtractedGraphMetadata(t.DataPoint)
 
 	// 6. Update Status
 	t.DataPoint.ProcessingStatus = schema.StatusCognified
@@ -286,7 +304,15 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 	}
 
 	// 8. Chain to MemifyTask in background
-	if wp != nil {
+	if t.WaitUntilComplete {
+		memifyTask := &MemifyTask{
+			DataPoint:            t.DataPoint,
+			ConsistencyThreshold: t.ConsistencyThreshold,
+		}
+		if err := memifyTask.Execute(ctx, ext, emb, store, graphStore, vectorStore, wp); err != nil {
+			return t.fail(ctx, store, err)
+		}
+	} else if wp != nil {
 		wp.Submit(&MemifyTask{
 			DataPoint:            t.DataPoint,
 			ConsistencyThreshold: t.ConsistencyThreshold,
@@ -294,6 +320,52 @@ func (t *CognifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, e
 	}
 
 	return nil
+}
+
+func normalizeExtractedGraphMetadata(dp *schema.DataPoint) {
+	if dp == nil {
+		return
+	}
+	confidence := 0.8
+	if dp.Metadata != nil {
+		switch v := dp.Metadata["confidence"].(type) {
+		case float64:
+			confidence = v
+		case float32:
+			confidence = float64(v)
+		}
+	}
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+
+	for _, node := range dp.Nodes {
+		if node == nil {
+			continue
+		}
+		if node.Properties == nil {
+			node.Properties = make(map[string]interface{})
+		}
+		node.Properties["source_id"] = dp.ID
+		if _, ok := node.Properties["confidence"]; !ok {
+			node.Properties["confidence"] = confidence
+		}
+		node.Properties["timestamp"] = ts
+		if node.SessionID == "" {
+			node.SessionID = dp.SessionID
+		}
+	}
+	for i := range dp.Edges {
+		if dp.Edges[i].Properties == nil {
+			dp.Edges[i].Properties = make(map[string]interface{})
+		}
+		dp.Edges[i].Properties["source_id"] = dp.ID
+		if _, ok := dp.Edges[i].Properties["confidence"]; !ok {
+			dp.Edges[i].Properties["confidence"] = confidence
+		}
+		dp.Edges[i].Properties["timestamp"] = ts
+		if dp.Edges[i].SessionID == "" {
+			dp.Edges[i].SessionID = dp.SessionID
+		}
+	}
 }
 
 func (t *CognifyTask) fail(ctx context.Context, store storage.Storage, err error) error {

@@ -35,6 +35,12 @@ func (t *MemifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, em
 				node.Properties = make(map[string]interface{})
 			}
 			node.Properties["source_id"] = t.DataPoint.ID
+			if _, ok := node.Properties["timestamp"]; !ok {
+				node.Properties["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+			if _, ok := node.Properties["confidence"]; !ok {
+				node.Properties["confidence"] = 0.8
+			}
 
 			// --- Consistency Reasoning ---
 			if t.ConsistencyThreshold > 0 && vectorStore != nil {
@@ -107,6 +113,19 @@ func (t *MemifyTask) Execute(ctx context.Context, ext extractor.LLMExtractor, em
 	if graphStore != nil && (len(t.DataPoint.Edges) > 0 || len(extraEdges) > 0) {
 		allEdges := append(t.DataPoint.Edges, extraEdges...)
 		for i := range allEdges {
+			if allEdges[i].Properties == nil {
+				allEdges[i].Properties = make(map[string]interface{})
+			}
+			allEdges[i].Properties["source_id"] = t.DataPoint.ID
+			if _, ok := allEdges[i].Properties["timestamp"]; !ok {
+				allEdges[i].Properties["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+			}
+			if _, ok := allEdges[i].Properties["confidence"]; !ok {
+				allEdges[i].Properties["confidence"] = 0.8
+			}
+			if allEdges[i].SessionID == "" {
+				allEdges[i].SessionID = t.DataPoint.SessionID
+			}
 			err := graphStore.CreateRelationship(ctx, &allEdges[i])
 			if err != nil {
 				log.Printf("failed to store edge in graphStore: %v", err)

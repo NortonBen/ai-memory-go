@@ -14,10 +14,12 @@ import (
 )
 
 var (
-	addFile   string
-	addURL    string
-	addTier   string
-	addLabels string
+	addFile        string
+	addURL         string
+	addTier        string
+	addLabels      string
+	addCognify     bool
+	addWaitCognify bool
 )
 
 var addCmd = &cobra.Command{
@@ -97,6 +99,13 @@ var addCmd = &cobra.Command{
 			return
 		}
 
+		if addCognify {
+			_, cogErr := eng.Cognify(ctx, dp, engine.WithWaitCognify(addWaitCognify))
+			if cogErr != nil {
+				color.Yellow("Added memory but Cognify failed: %v", cogErr)
+			}
+		}
+
 		color.Green("Successfully added memory with ID: %s", dp.ID)
 	},
 }
@@ -107,4 +116,6 @@ func init() {
 	addCmd.Flags().StringVar(&addURL, "url", "", "read content from URL")
 	addCmd.Flags().StringVar(&addTier, "tier", "", "memory partition: core, general, data, storage")
 	addCmd.Flags().StringVar(&addLabels, "labels", "", "comma-separated classification labels (rule,policy,story-name,...); not used for search filtering")
+	addCmd.Flags().BoolVar(&addCognify, "cognify", true, "run cognify after adding memory")
+	addCmd.Flags().BoolVar(&addWaitCognify, "wait-cognify", true, "wait for cognify completion before returning")
 }

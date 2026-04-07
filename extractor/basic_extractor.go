@@ -4,6 +4,7 @@ package extractor
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/NortonBen/ai-memory-go/schema"
@@ -47,6 +48,7 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 		Entities []struct {
 			Name       string      `json:"name"`
 			Type       string      `json:"type"`
+			Confidence float64     `json:"confidence,omitempty"`
 			Properties interface{} `json:"properties,omitempty"`
 		} `json:"entities"`
 	}
@@ -60,7 +62,10 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 	// Convert to schema.Node
 	nodes := make([]schema.Node, 0, len(result.Entities))
 	for _, entity := range result.Entities {
-		nodeType := schema.NodeType(entity.Type)
+		nodeType, knownNodeType := normalizeNodeType(entity.Type)
+		if be.config.StrictMode && !knownNodeType {
+			return nil, fmt.Errorf("unknown node type in strict mode: %q", entity.Type)
+		}
 
 		properties := make(map[string]interface{})
 
@@ -100,6 +105,9 @@ func (be *BasicExtractor) extractEntitiesWithSchema(ctx context.Context, prompt 
 			entityName = "Entity"
 		}
 		properties["name"] = entityName
+		if c, ok := normalizeConfidence(entity.Confidence); ok {
+			properties["confidence"] = c
+		}
 
 		node := schema.NewNode(nodeType, properties)
 		nodes = append(nodes, *node)
@@ -135,7 +143,11 @@ func (be *BasicExtractor) extractEntitiesFromText(ctx context.Context, prompt st
 				"name": name,
 			}
 
-			node := schema.NewNode(schema.NodeType(typeStr), properties)
+			nodeType, knownNodeType := normalizeNodeType(typeStr)
+			if be.config.StrictMode && !knownNodeType {
+				return nil, fmt.Errorf("unknown node type in strict mode: %q", typeStr)
+			}
+			node := schema.NewNode(nodeType, properties)
 			nodes = append(nodes, *node)
 		}
 	}
@@ -165,6 +177,7 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 			From       string      `json:"from"`
 			To         string      `json:"to"`
 			Type       string      `json:"type"`
+			Confidence float64     `json:"confidence,omitempty"`
 			Weight     float64     `json:"weight,omitempty"`
 			Properties interface{} `json:"properties,omitempty"`
 		} `json:"relationships"`
@@ -201,7 +214,11 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 			weight = 1.0
 		}
 
-		edge := schema.NewEdge(fromID, toID, schema.EdgeType(rel.Type), weight)
+		edgeType, knownEdgeType := normalizeEdgeType(rel.Type)
+		if be.config.StrictMode && !knownEdgeType {
+			return nil, fmt.Errorf("unknown edge type in strict mode: %q", rel.Type)
+		}
+		edge := schema.NewEdge(fromID, toID, edgeType, weight)
 
 		// Parse properties robustly if present
 		if rel.Properties != nil {
@@ -222,6 +239,12 @@ func (be *BasicExtractor) extractRelationshipsWithSchema(ctx context.Context, pr
 			case string:
 				edge.Properties = map[string]interface{}{"description": v}
 			}
+		}
+		if c, ok := normalizeConfidence(rel.Confidence); ok {
+			if edge.Properties == nil {
+				edge.Properties = make(map[string]interface{})
+			}
+			edge.Properties["confidence"] = c
 		}
 
 		edges = append(edges, *edge)
@@ -270,7 +293,11 @@ func (be *BasicExtractor) extractRelationshipsFromText(ctx context.Context, prom
 				toID, toExists := entityMap[to]
 
 				if fromExists && toExists {
-					edge := schema.NewEdge(fromID, toID, schema.EdgeType(relType), 1.0)
+					edgeType, knownEdgeType := normalizeEdgeType(relType)
+					if be.config.StrictMode && !knownEdgeType {
+						return nil, fmt.Errorf("unknown edge type in strict mode: %q", relType)
+					}
+					edge := schema.NewEdge(fromID, toID, edgeType, 1.0)
 					edges = append(edges, *edge)
 				}
 			}
@@ -304,21 +331,24 @@ func (be *BasicExtractor) generateEntityPrompt(text string) string {
 
 	// Default generic prompt
 	return fmt.Sprintf(`Extract key entities from the following text block (which may include chat history).
-Identify important people, places, organizations, and specific factual concepts.
+Use this ontology for "type":
+- Person, Org, Project, Task, Event, Document, Concept, Entity, Session, User
 
 CRITICAL INSTRUCTIONS:
 1. FOCUS primarily on new information in the "Current User Message" section if history is present.
 2. DO NOT extract meta-concepts about the system itself (e.g., "mảnh ký ức", "lịch sử", "thông tin", "hệ thống", "quá trình").
 3. DO NOT extract temporal words as entities (e.g., "bây giờ", "hôm qua").
-4. If the text says "I am [Name]", extract an Entity of type 'Person' with name '[Name]'.
+4. If the text says "I am [Name]", extract type 'Person' with name '[Name]'.
+5. Keep names canonical and concise (e.g., "OpenAI", not "the OpenAI company in this message").
+6. Add optional properties when available: role, title, aliases, source_span.
 
 Text for extraction:
 %s
 
 Return a JSON object with an "entities" array. Each entity should have:
 - name: the entity name (canonical form)
-- type: the entity type (Person, Place, Organization, Concept, Item)
-- properties: a JSON object containing key-value pairs of additional details discovered in the text.`, text)
+- type: MUST be one of the ontology values listed above
+- properties: a JSON object containing additional details discovered in the text.`, text)
 }
 
 // generateRelationshipPrompt generates a prompt for relationship extraction
@@ -352,7 +382,9 @@ Analyze the following text and identify relationships between the entities:
 Return a JSON object with a "relationships" array. Each relationship should have:
 - from: source entity name
 - to: target entity name
-- type: relationship type (RELATED_TO, SIMILAR_TO, PART_OF, etc.)
+- type: relationship type from ontology:
+  MENTIONS, RELATED_TO, WORKS_ON, DEPENDS_ON, DISCUSSED_IN,
+  CONTAINS, PART_OF, USED_IN, REFERENCED_BY, SIMILAR_TO, UPDATES, CONTRADICTS
 - weight: relationship strength (0.0 to 1.0, optional)`, strings.Join(entityNames, ", "), text)
 }
 
@@ -482,7 +514,7 @@ func extractName(props map[string]interface{}) string {
 	if id, ok := props["id"].(string); ok {
 		return id
 	}
-	
+
 	// Handle arrays natively created by JSON Unmarshal (e.g. from LLM extraction output)
 	if names, ok := props["name"].([]interface{}); ok && len(names) > 0 {
 		if str, ok := names[0].(string); ok {
@@ -523,12 +555,12 @@ Return a JSON object with:
 - reasoning: brief explanation`, text)
 
 	type IntentResult struct {
-		NeedsVectorStorage bool                    `json:"needs_vector_storage"`
-		IsQuery            bool                    `json:"is_query"`
-		IsDelete           bool                    `json:"is_delete"`
-		DeleteTargets      []string                `json:"delete_targets"`
+		NeedsVectorStorage bool                      `json:"needs_vector_storage"`
+		IsQuery            bool                      `json:"is_query"`
+		IsDelete           bool                      `json:"is_delete"`
+		DeleteTargets      []string                  `json:"delete_targets"`
 		Relationships      []schema.RelationshipInfo `json:"relationships"`
-		Reasoning          string                  `json:"reasoning"`
+		Reasoning          string                    `json:"reasoning"`
 	}
 
 	var result IntentResult
@@ -582,4 +614,89 @@ Return a JSON object with:
 	}
 
 	return &result, nil
+}
+
+func normalizeNodeType(raw string) (schema.NodeType, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "person", "people", "human":
+		return schema.NodeTypePerson, true
+	case "org", "organization", "organisation", "company":
+		return schema.NodeTypeOrg, true
+	case "project", "initiative", "program":
+		return schema.NodeTypeProject, true
+	case "task", "todo", "ticket", "issue":
+		return schema.NodeTypeTask, true
+	case "event", "meeting", "incident":
+		return schema.NodeTypeEvent, true
+	case "document", "doc", "file":
+		return schema.NodeTypeDocument, true
+	case "session", "conversation", "chat":
+		return schema.NodeTypeSession, true
+	case "user":
+		return schema.NodeTypeUser, true
+	case "concept", "idea", "topic":
+		return schema.NodeTypeConcept, true
+	case "word", "term", "keyword":
+		return schema.NodeTypeWord, true
+	case "userpreference", "user_preference", "preference":
+		return schema.NodeTypeUserPreference, true
+	case "grammarrule", "grammar_rule":
+		return schema.NodeTypeGrammarRule, true
+	case "entity", "":
+		return schema.NodeTypeEntity, true
+	default:
+		return schema.NodeTypeEntity, false
+	}
+}
+
+func normalizeEdgeType(raw string) (schema.EdgeType, bool) {
+	s := strings.ToUpper(strings.TrimSpace(raw))
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	switch s {
+	case "MENTION", "MENTIONS":
+		return schema.EdgeTypeMentions, true
+	case "WORKS_ON", "ASSIGNED_TO", "LEADS", "MANAGES", "OWNER_OF", "OWNS":
+		return schema.EdgeTypeWorksOn, true
+	case "DEPENDS_ON", "REQUIRES", "BLOCKED_BY", "NEEDS":
+		return schema.EdgeTypeDependsOn, true
+	case "DISCUSSED_IN", "DISCUSSED_AT", "MENTIONED_IN", "TALKED_IN":
+		return schema.EdgeTypeDiscussedIn, true
+	case "RELATED_TO", "RELATES_TO", "MEMBER_OF", "LOCATED_IN", "ASSOCIATED_WITH":
+		return schema.EdgeTypeRelatedTo, true
+	case "CONTAINS":
+		return schema.EdgeTypeContains, true
+	case "REFERENCED_BY":
+		return schema.EdgeTypeReferencedBy, true
+	case "SIMILAR_TO":
+		return schema.EdgeTypeSimilarTo, true
+	case "PART_OF":
+		return schema.EdgeTypePartOf, true
+	case "CREATED_BY":
+		return schema.EdgeTypeCreatedBy, true
+	case "USED_IN":
+		return schema.EdgeTypeUsedIn, true
+	case "CONTRADICTS":
+		return schema.EdgeTypeContradicts, true
+	case "UPDATES", "UPDATED_BY":
+		return schema.EdgeTypeUpdates, true
+	case "FAILED_AT":
+		return schema.EdgeTypeFailedAt, true
+	case "SYNONYM", "SYNONYM_OF":
+		return schema.EdgeTypeSynonym, true
+	case "STRUGGLES_WITH":
+		return schema.EdgeTypeStrugglesWIth, true
+	default:
+		return schema.EdgeTypeRelatedTo, false
+	}
+}
+
+func normalizeConfidence(raw float64) (float64, bool) {
+	if raw <= 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
+		return 0, false
+	}
+	if raw > 1 {
+		return 1, true
+	}
+	return raw, true
 }

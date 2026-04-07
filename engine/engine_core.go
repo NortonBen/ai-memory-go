@@ -218,6 +218,7 @@ func (e *defaultMemoryEngine) Cognify(ctx context.Context, dataPoint *schema.Dat
 	task := &CognifyTask{
 		DataPoint:            dataPoint,
 		ConsistencyThreshold: threshold,
+		WaitUntilComplete:    options.WaitUntilComplete,
 	}
 
 	if options.WaitUntilComplete {
@@ -328,6 +329,7 @@ func (e *defaultMemoryEngine) cleanJSONResponse(resp string) string {
 	resp = strings.TrimSuffix(resp, "```")
 	return strings.TrimSpace(resp)
 }
+
 // getHistoryBuffer returns the last N messages formatted for context injection.
 func (e *defaultMemoryEngine) getHistoryBuffer(ctx context.Context, sessionID string, limit int) string {
 	if e.store == nil || sessionID == "" {

@@ -289,7 +289,9 @@ func (s *Server) handleRelationships(w http.ResponseWriter, r *http.Request) {
 	sessionParam := strings.TrimSpace(r.URL.Query().Get("session"))
 
 	query := storage.DefaultDataPointQuery()
-	query.Limit = limit
+	// Load a wider window first so relationship view doesn't look empty when
+	// newest rows are mostly input/pending records without extracted graph payload.
+	query.Limit = 100000
 	if sid, unscoped := sessionid.ListFilter(sessionParam); unscoped {
 		query.UnscopedSessionOnly = true
 	} else {
@@ -340,6 +342,12 @@ func (s *Server) handleRelationships(w http.ResponseWriter, r *http.Request) {
 	for _, n := range nodes {
 		nodeList = append(nodeList, n)
 	}
+	if len(nodeList) > limit {
+		nodeList = nodeList[:limit]
+	}
+	if len(edges) > limit*4 {
+		edges = edges[:limit*4]
+	}
 
 	// Fallback: if datapoints do not carry extracted graph payloads, pull from GraphStore directly.
 	if len(nodeList) == 0 && len(edges) == 0 && s.deps.Graph != nil {
@@ -367,6 +375,11 @@ func (s *Server) loadGraphSnapshot(ctx context.Context, limit int) ([]map[string
 		schema.NodeTypeUserPreference,
 		schema.NodeTypeGrammarRule,
 		schema.NodeTypeEntity,
+		schema.NodeTypePerson,
+		schema.NodeTypeOrg,
+		schema.NodeTypeProject,
+		schema.NodeTypeTask,
+		schema.NodeTypeEvent,
 		schema.NodeTypeDocument,
 		schema.NodeTypeSession,
 		schema.NodeTypeUser,
@@ -658,8 +671,8 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		"id":             dp.ID,
 		"session_id":     dp.SessionID,
 		"memory_tier":    schema.MemoryTierFromDataPoint(dp),
-		"labels":        schema.LabelsFromMetadata(dp.Metadata),
-		"primary_label": primaryLabelFromDP(dp),
+		"labels":         schema.LabelsFromMetadata(dp.Metadata),
+		"primary_label":  primaryLabelFromDP(dp),
 		"cognify_queued": body.Cognify,
 	})
 }
@@ -703,18 +716,18 @@ func queryBool(r *http.Request, key string) bool {
 
 // thinkRequest JSON cho POST /api/think (tách tag để client không phụ thuộc tên field Go).
 type thinkRequest struct {
-	Text               string                       `json:"text"`
-	SessionID          string                       `json:"session_id"`
-	Limit              int                          `json:"limit"`
-	HopDepth           int                          `json:"hop_depth"`
-	AnalyzeQuery       bool                         `json:"analyze_query"`
-	EnableThinking     bool                         `json:"enable_thinking"`
-	MaxThinkingSteps   int                          `json:"max_thinking_steps"`
-	LearnRelationships bool                         `json:"learn_relationships"`
-	IncludeReasoning   bool                         `json:"include_reasoning"`
-	MaxContextLength   int                          `json:"max_context_length"`
-	SegmentContext     bool                         `json:"segment_context"`
-	FourTier *schema.FourTierSearchOptions `json:"four_tier,omitempty"`
+	Text               string                        `json:"text"`
+	SessionID          string                        `json:"session_id"`
+	Limit              int                           `json:"limit"`
+	HopDepth           int                           `json:"hop_depth"`
+	AnalyzeQuery       bool                          `json:"analyze_query"`
+	EnableThinking     bool                          `json:"enable_thinking"`
+	MaxThinkingSteps   int                           `json:"max_thinking_steps"`
+	LearnRelationships bool                          `json:"learn_relationships"`
+	IncludeReasoning   bool                          `json:"include_reasoning"`
+	MaxContextLength   int                           `json:"max_context_length"`
+	SegmentContext     bool                          `json:"segment_context"`
+	FourTier           *schema.FourTierSearchOptions `json:"four_tier,omitempty"`
 }
 
 func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
@@ -753,7 +766,7 @@ func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
 		IncludeReasoning:   req.IncludeReasoning,
 		MaxContextLength:   req.MaxContextLength,
 		SegmentContext:     req.SegmentContext,
-		FourTier: req.FourTier,
+		FourTier:           req.FourTier,
 	}
 	if tq.MaxThinkingSteps <= 0 && tq.EnableThinking {
 		tq.MaxThinkingSteps = 3

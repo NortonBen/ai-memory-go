@@ -6,13 +6,13 @@ package schema
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"runtime"
-	"sync"
 	"strings"
-	"crypto/sha256"
+	"sync"
 	"time"
 )
 
@@ -25,6 +25,11 @@ const (
 	NodeTypeUserPreference NodeType = "UserPreference"
 	NodeTypeGrammarRule    NodeType = "GrammarRule"
 	NodeTypeEntity         NodeType = "Entity"
+	NodeTypePerson         NodeType = "Person"
+	NodeTypeOrg            NodeType = "Org"
+	NodeTypeProject        NodeType = "Project"
+	NodeTypeTask           NodeType = "Task"
+	NodeTypeEvent          NodeType = "Event"
 	NodeTypeDocument       NodeType = "Document"
 	NodeTypeSession        NodeType = "Session"
 	NodeTypeUser           NodeType = "User"
@@ -47,6 +52,10 @@ type EdgeType string
 
 const (
 	EdgeTypeRelatedTo     EdgeType = "RELATED_TO"
+	EdgeTypeMentions      EdgeType = "MENTIONS"
+	EdgeTypeWorksOn       EdgeType = "WORKS_ON"
+	EdgeTypeDependsOn     EdgeType = "DEPENDS_ON"
+	EdgeTypeDiscussedIn   EdgeType = "DISCUSSED_IN"
 	EdgeTypeFailedAt      EdgeType = "FAILED_AT"
 	EdgeTypeSynonym       EdgeType = "SYNONYM"
 	EdgeTypeStrugglesWIth EdgeType = "STRUGGLES_WITH"
@@ -131,7 +140,7 @@ type Chunk struct {
 func NewChunk(content, source string, chunkType ChunkType) *Chunk {
 	id := GenerateChunkID(content, source)
 	hash := GenerateContentHash(content)
-	
+
 	return &Chunk{
 		ID:        id,
 		Content:   content,
@@ -142,7 +151,6 @@ func NewChunk(content, source string, chunkType ChunkType) *Chunk {
 		CreatedAt: time.Now(),
 	}
 }
-
 
 // ChunkingStrategy defines how content should be split into chunks
 type ChunkingStrategy string
@@ -284,10 +292,10 @@ type CacheMetrics struct {
 
 // StreamingConfig configures streaming parser behavior
 type StreamingConfig struct {
-	BufferSize             int           `json:"buffer_size"`
-	ChunkOverlap           int           `json:"chunk_overlap"`
-	MaxChunkSize           int           `json:"max_chunk_size"`
-	MinChunkSize           int           `json:"min_chunk_size"`
+	BufferSize             int `json:"buffer_size"`
+	ChunkOverlap           int `json:"chunk_overlap"`
+	MaxChunkSize           int `json:"max_chunk_size"`
+	MinChunkSize           int `json:"min_chunk_size"`
 	ProgressCallback       func(bytesProcessed, totalBytes int64, chunksCreated int)
 	EnableProgressTracking bool          `json:"enable_progress_tracking"`
 	FlushInterval          time.Duration `json:"flush_interval"`
@@ -758,12 +766,12 @@ type SearchQuery struct {
 
 // SearchResults contains the results of a search operation
 type SearchResults struct {
-	Results       []*SearchResult `json:"results"`
-	Total         int             `json:"total"`
-	QueryTime     time.Duration   `json:"query_time"`
-	ContextSize   int             `json:"context_size"`
-	Answer        string          `json:"answer,omitempty"`
-	ParsedContext string          `json:"parsed_context,omitempty"`
+	Results       []*SearchResult      `json:"results"`
+	Total         int                  `json:"total"`
+	QueryTime     time.Duration        `json:"query_time"`
+	ContextSize   int                  `json:"context_size"`
+	Answer        string               `json:"answer,omitempty"`
+	ParsedContext string               `json:"parsed_context,omitempty"`
 	FourTierStats *FourTierSearchStats `json:"four_tier_stats,omitempty"`
 }
 
@@ -831,11 +839,10 @@ type ThinkResult struct {
 
 // AgenticQueryResult is the final synthesized output containing reasoning flow
 type AgenticQueryResult struct {
-	ReasoningPath   []string
-	FinalAnswer     string
-	ContextList     []string
+	ReasoningPath []string
+	FinalAnswer   string
+	ContextList   []string
 }
-
 
 // SearchResult represents a final search result with rich context for LLM consumption
 type SearchResult struct {
