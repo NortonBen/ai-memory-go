@@ -66,7 +66,7 @@ jobs:
       with:
         install-mode: goinstall
         version: latest
-        args: --timeout=5m --out-format=colored-line-number
+        args: --timeout=5m
 
   build:
     name: Build
