@@ -8,7 +8,6 @@ run:
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
@@ -20,7 +19,6 @@ linters:
     - unconvert
     - unparam
     - prealloc
-    - exportloopref
   settings:
     errcheck:
       check-type-assertions: true
