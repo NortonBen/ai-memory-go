@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/NortonBen/ai-memory-go/graph"
@@ -13,29 +14,40 @@ import (
 // maxVectorChunkSuffixProbes covers nested chunk embedding ids "{id}-chunk-{n}".
 const maxVectorChunkSuffixProbes = 512
 
-func deleteVectorsForDataPoint(ctx context.Context, vs vector.VectorStore, dpID string) {
+func deleteVectorsForDataPoint(ctx context.Context, vs vector.VectorStore, dpID string) error {
 	if vs == nil || dpID == "" {
-		return
+		return nil
 	}
-	_ = vs.DeleteEmbedding(ctx, dpID)
+	var errs []error
+	if err := vs.DeleteEmbedding(ctx, dpID); err != nil {
+		errs = append(errs, fmt.Errorf("delete embedding %s: %w", dpID, err))
+	}
 	for i := 0; i < maxVectorChunkSuffixProbes; i++ {
-		_ = vs.DeleteEmbedding(ctx, fmt.Sprintf("%s-chunk-%d", dpID, i))
+		chunkID := fmt.Sprintf("%s-chunk-%d", dpID, i)
+		if err := vs.DeleteEmbedding(ctx, chunkID); err != nil {
+			errs = append(errs, fmt.Errorf("delete embedding %s: %w", chunkID, err))
+		}
 	}
+	return errors.Join(errs...)
 }
 
-func deleteGraphNodesForSource(ctx context.Context, gs graph.GraphStore, sourceID string) {
+func deleteGraphNodesForSource(ctx context.Context, gs graph.GraphStore, sourceID string) error {
 	if gs == nil || sourceID == "" {
-		return
+		return nil
 	}
 	nodes, err := gs.FindNodesByProperty(ctx, "source_id", sourceID)
 	if err != nil {
-		return
+		return fmt.Errorf("find graph nodes by source_id=%s: %w", sourceID, err)
 	}
+	var errs []error
 	for _, n := range nodes {
 		if n != nil {
-			_ = gs.DeleteNode(ctx, n.ID)
+			if err := gs.DeleteNode(ctx, n.ID); err != nil {
+				errs = append(errs, fmt.Errorf("delete graph node %s: %w", n.ID, err))
+			}
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (e *defaultMemoryEngine) deleteAllMemoryForSession(ctx context.Context, unscoped bool, named string) error {
@@ -59,18 +71,28 @@ func (e *defaultMemoryEngine) deleteAllMemoryForSession(ctx context.Context, uns
 		if dp == nil {
 			continue
 		}
-		deleteGraphNodesForSource(ctx, e.graphStore, dp.ID)
-		deleteVectorsForDataPoint(ctx, e.vectorStore, dp.ID)
+		if err := deleteGraphNodesForSource(ctx, e.graphStore, dp.ID); err != nil {
+			return err
+		}
+		if err := deleteVectorsForDataPoint(ctx, e.vectorStore, dp.ID); err != nil {
+			return err
+		}
 	}
 	if e.graphStore != nil {
 		if unscoped {
-			_ = e.graphStore.DeleteGraphBySessionID(ctx, "")
+			if err := e.graphStore.DeleteGraphBySessionID(ctx, ""); err != nil {
+				return fmt.Errorf("delete unscoped graph session: %w", err)
+			}
 		} else {
-			_ = e.graphStore.DeleteGraphBySessionID(ctx, named)
+			if err := e.graphStore.DeleteGraphBySessionID(ctx, named); err != nil {
+				return fmt.Errorf("delete graph session %s: %w", named, err)
+			}
 		}
 	}
 	if !unscoped {
-		_ = e.store.DeleteSessionMessages(ctx, named)
+		if err := e.store.DeleteSessionMessages(ctx, named); err != nil {
+			return fmt.Errorf("delete session messages %s: %w", named, err)
+		}
 	}
 	if unscoped {
 		return e.store.DeleteDataPointsUnscoped(ctx)

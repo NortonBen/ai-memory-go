@@ -240,11 +240,15 @@ func (e *defaultMemoryEngine) DeleteMemory(ctx context.Context, id string, sessi
 			nodes, err := e.graphStore.FindNodesByProperty(ctx, "source_id", id)
 			if err == nil {
 				for _, n := range nodes {
-					_ = e.graphStore.DeleteNode(ctx, n.ID)
+					if err := e.graphStore.DeleteNode(ctx, n.ID); err != nil {
+						return fmt.Errorf("delete graph node %s: %w", n.ID, err)
+					}
 				}
 			}
 		}
-		deleteVectorsForDataPoint(ctx, e.vectorStore, id)
+		if err := deleteVectorsForDataPoint(ctx, e.vectorStore, id); err != nil {
+			return err
+		}
 		return e.store.DeleteDataPoint(ctx, id)
 	}
 
