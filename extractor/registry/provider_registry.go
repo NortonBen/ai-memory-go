@@ -4,7 +4,7 @@ package registry
 
 import (
 	ext "github.com/NortonBen/ai-memory-go/extractor"
-	
+
 	"context"
 	"fmt"
 	"sync"
@@ -23,7 +23,7 @@ type ProviderRegistry struct {
 	registeredEmbeddings map[string]*RegisteredEmbeddingProvider
 	healthCheckInterval  time.Duration
 	healthCheckEnabled   bool
-	healthCheckStopChan  chan struct{}
+	healthCheckCancel    context.CancelFunc
 	healthCheckRunning   bool
 }
 
@@ -61,9 +61,8 @@ func NewProviderRegistry() *ProviderRegistry {
 		configManager:        ext.NewConfigManager(),
 		registeredLLMs:       make(map[string]*RegisteredLLMProvider),
 		registeredEmbeddings: make(map[string]*RegisteredEmbeddingProvider),
-		healthCheckInterval:  5 * time.Minute,
-		healthCheckEnabled:   true,
-		healthCheckStopChan:  make(chan struct{}),
+		healthCheckInterval: 5 * time.Minute,
+		healthCheckEnabled:  true,
 	}
 }
 
@@ -281,8 +280,11 @@ func (r *ProviderRegistry) ListLLMProviders() map[string]*RegisteredLLMProvider 
 
 	result := make(map[string]*RegisteredLLMProvider)
 	for name, provider := range r.registeredLLMs {
-		// Return a copy to prevent modification
 		providerCopy := *provider
+		if provider.Health != nil {
+			h := *provider.Health
+			providerCopy.Health = &h
+		}
 		result[name] = &providerCopy
 	}
 	return result
@@ -295,8 +297,11 @@ func (r *ProviderRegistry) ListEmbeddingProviders() map[string]*RegisteredEmbedd
 
 	result := make(map[string]*RegisteredEmbeddingProvider)
 	for name, provider := range r.registeredEmbeddings {
-		// Return a copy to prevent modification
 		providerCopy := *provider
+		if provider.Health != nil {
+			h := *provider.Health
+			providerCopy.Health = &h
+		}
 		result[name] = &providerCopy
 	}
 	return result
@@ -363,7 +368,19 @@ func (r *ProviderRegistry) UpdateEmbeddingProviderConfig(name string, config *ex
 // HealthCheck performs health checks on all registered providers
 func (r *ProviderRegistry) HealthCheck(ctx context.Context) (*RegistryHealthStatus, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	llmNames := make([]string, 0, len(r.registeredLLMs))
+	llmProviders := make(map[string]ext.LLMProvider, len(r.registeredLLMs))
+	for name, reg := range r.registeredLLMs {
+		llmNames = append(llmNames, name)
+		llmProviders[name] = reg.Provider
+	}
+	embNames := make([]string, 0, len(r.registeredEmbeddings))
+	embProviders := make(map[string]ext.EmbeddingProvider, len(r.registeredEmbeddings))
+	for name, reg := range r.registeredEmbeddings {
+		embNames = append(embNames, name)
+		embProviders[name] = reg.Provider
+	}
+	r.mu.RUnlock()
 
 	status := &RegistryHealthStatus{
 		Timestamp:          time.Now(),
@@ -371,52 +388,70 @@ func (r *ProviderRegistry) HealthCheck(ctx context.Context) (*RegistryHealthStat
 		EmbeddingProviders: make(map[string]*ext.EmbeddingProviderHealthStatus),
 	}
 
-	// Check LLM providers
-	for name, registered := range r.registeredLLMs {
+	for _, name := range llmNames {
+		p := llmProviders[name]
 		start := time.Now()
-		err := registered.Provider.Health(ctx)
+		err := p.Health(ctx)
 		responseTime := time.Since(start)
 
+		r.mu.Lock()
+		reg := r.registeredLLMs[name]
+		if reg == nil {
+			r.mu.Unlock()
+			continue
+		}
+		prev := 0
+		if reg.Health != nil {
+			prev = reg.Health.ConsecutiveFails
+		}
 		healthStatus := &ext.ProviderHealthStatus{
 			IsHealthy:        err == nil,
 			LastCheck:        time.Now(),
 			ResponseTime:     responseTime,
-			ConsecutiveFails: registered.Health.ConsecutiveFails,
+			ConsecutiveFails: prev,
 		}
-
 		if err != nil {
 			healthStatus.ErrorMessage = err.Error()
-			registered.Health.ConsecutiveFails++
+			healthStatus.ConsecutiveFails = prev + 1
 		} else {
-			registered.Health.ConsecutiveFails = 0
+			healthStatus.ConsecutiveFails = 0
 		}
-
-		registered.Health = healthStatus
+		reg.Health = healthStatus
 		status.LLMProviders[name] = healthStatus
+		r.mu.Unlock()
 	}
 
-	// Check embedding providers
-	for name, registered := range r.registeredEmbeddings {
+	for _, name := range embNames {
+		p := embProviders[name]
 		start := time.Now()
-		err := registered.Provider.Health(ctx)
+		err := p.Health(ctx)
 		responseTime := time.Since(start)
 
+		r.mu.Lock()
+		reg := r.registeredEmbeddings[name]
+		if reg == nil {
+			r.mu.Unlock()
+			continue
+		}
+		prev := 0
+		if reg.Health != nil {
+			prev = reg.Health.ConsecutiveFails
+		}
 		healthStatus := &ext.EmbeddingProviderHealthStatus{
 			IsHealthy:        err == nil,
 			LastCheck:        time.Now(),
 			ResponseTime:     responseTime,
-			ConsecutiveFails: registered.Health.ConsecutiveFails,
+			ConsecutiveFails: prev,
 		}
-
 		if err != nil {
 			healthStatus.ErrorMessage = err.Error()
-			registered.Health.ConsecutiveFails++
+			healthStatus.ConsecutiveFails = prev + 1
 		} else {
-			registered.Health.ConsecutiveFails = 0
+			healthStatus.ConsecutiveFails = 0
 		}
-
-		registered.Health = healthStatus
+		reg.Health = healthStatus
 		status.EmbeddingProviders[name] = healthStatus
+		r.mu.Unlock()
 	}
 
 	return status, nil
@@ -429,10 +464,12 @@ func (r *ProviderRegistry) StartHealthChecks(ctx context.Context) {
 		r.mu.Unlock()
 		return
 	}
+	workerCtx, cancel := context.WithCancel(ctx)
+	r.healthCheckCancel = cancel
 	r.healthCheckRunning = true
 	r.mu.Unlock()
 
-	go r.healthCheckWorker(ctx)
+	go r.healthCheckWorker(workerCtx)
 }
 
 // StopHealthChecks stops periodic health checks
@@ -444,9 +481,11 @@ func (r *ProviderRegistry) StopHealthChecks() {
 		return
 	}
 
-	close(r.healthCheckStopChan)
+	if r.healthCheckCancel != nil {
+		r.healthCheckCancel()
+		r.healthCheckCancel = nil
+	}
 	r.healthCheckRunning = false
-	r.healthCheckStopChan = make(chan struct{})
 }
 
 // SetHealthCheckInterval sets the health check interval
@@ -579,14 +618,15 @@ func (r *ProviderRegistry) registerProvidersFromConfig() error {
 }
 
 func (r *ProviderRegistry) healthCheckWorker(ctx context.Context) {
-	ticker := time.NewTicker(r.healthCheckInterval)
+	r.mu.RLock()
+	interval := r.healthCheckInterval
+	r.mu.RUnlock()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-r.healthCheckStopChan:
 			return
 		case <-ticker.C:
 			if _, err := r.HealthCheck(ctx); err != nil {

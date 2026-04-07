@@ -118,7 +118,7 @@ func TestCognifyTaskChunking(t *testing.T) {
 
 	// Verify child chunk datapoints were created and marked pending.
 	childCount := 0
-	for _, stored := range store.dataPoints {
+	for _, stored := range store.dataPointsSnapshot() {
 		if stored.Metadata == nil {
 			continue
 		}
@@ -170,7 +170,7 @@ func TestCognifyParentSplitInheritsLabelsOnAllChunkChildren(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	for _, stored := range store.dataPoints {
+	for _, stored := range store.dataPointsSnapshot() {
 		if stored.Metadata == nil {
 			continue
 		}

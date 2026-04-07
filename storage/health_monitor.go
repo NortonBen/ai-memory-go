@@ -59,6 +59,7 @@ type HealthMonitor struct {
 
 	// State management
 	mu         sync.RWMutex
+	checkRunMu sync.Mutex // serializes CheckAll / CheckOne vs concurrent CheckAll (e.g. monitor + GetHealthReport)
 	lastReport *HealthReport
 	isRunning  int32
 	stopChan   chan struct{}
@@ -177,6 +178,9 @@ func (hm *HealthMonitor) Stop() error {
 
 // CheckAll performs health checks on all registered checkers
 func (hm *HealthMonitor) CheckAll(ctx context.Context) *HealthReport {
+	hm.checkRunMu.Lock()
+	defer hm.checkRunMu.Unlock()
+
 	start := time.Now()
 
 	hm.mu.RLock()
@@ -240,6 +244,9 @@ func (hm *HealthMonitor) CheckOne(ctx context.Context, name string) (*HealthChec
 
 	checkCtx, cancel := context.WithTimeout(ctx, hm.config.CheckTimeout)
 	defer cancel()
+
+	hm.checkRunMu.Lock()
+	defer hm.checkRunMu.Unlock()
 
 	check := hm.performCheck(checkCtx, checker)
 	return &check, nil

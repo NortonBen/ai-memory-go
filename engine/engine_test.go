@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,6 +108,7 @@ func (m *mockExtractor) SetProvider(p extractor.LLMProvider) {}
 func (m *mockExtractor) Close() error { return nil }
 
 type mockStorage struct {
+	mu         sync.RWMutex
 	dataPoints map[string]*schema.DataPoint
 	messages   map[string][]schema.Message
 }
@@ -118,12 +120,34 @@ func newMockStorage() *mockStorage {
 	}
 }
 
+// dataPointCount returns len(dataPoints) for tests (safe with async workers).
+func (m *mockStorage) dataPointCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.dataPoints)
+}
+
+// dataPointsSnapshot returns a copy of stored datapoints for tests.
+func (m *mockStorage) dataPointsSnapshot() []*schema.DataPoint {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*schema.DataPoint, 0, len(m.dataPoints))
+	for _, dp := range m.dataPoints {
+		out = append(out, dp)
+	}
+	return out
+}
+
 func (m *mockStorage) StoreDataPoint(ctx context.Context, dp *schema.DataPoint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.dataPoints[dp.ID] = dp
 	return nil
 }
 
 func (m *mockStorage) QueryDataPoints(ctx context.Context, query *storage.DataPointQuery) ([]*schema.DataPoint, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var res []*schema.DataPoint
 	for _, dp := range m.dataPoints {
 		if query.UnscopedSessionOnly {
@@ -148,6 +172,8 @@ func (m *mockStorage) QueryDataPoints(ctx context.Context, query *storage.DataPo
 }
 
 func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.DataPoint, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.dataPoints == nil {
 		return nil, nil
 	}
@@ -156,6 +182,8 @@ func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.Data
 func (m *mockStorage) UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error { return nil }
 func (m *mockStorage) DeleteDataPoint(ctx context.Context, id string) error { return nil }
 func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id, dp := range m.dataPoints {
 		if dp != nil && dp.SessionID == sessionID {
 			delete(m.dataPoints, id)
@@ -164,6 +192,8 @@ func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID s
 	return nil
 }
 func (m *mockStorage) DeleteDataPointsUnscoped(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id, dp := range m.dataPoints {
 		if dp != nil && dp.SessionID == "" {
 			delete(m.dataPoints, id)
@@ -179,13 +209,19 @@ func (m *mockStorage) ListSessions(ctx context.Context, userID string) ([]*schem
 func (m *mockStorage) StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error { return nil }
 func (m *mockStorage) DeleteBatch(ctx context.Context, ids []string) error { return nil }
 func (m *mockStorage) AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.messages[sessionID] = append(m.messages[sessionID], message)
 	return nil
 }
 func (m *mockStorage) GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.messages[sessionID], nil
 }
 func (m *mockStorage) DeleteSessionMessages(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.messages, sessionID)
 	return nil
 }
@@ -283,7 +319,7 @@ func TestDeleteMemoryBySession(t *testing.T) {
 	if dp, _ := store.GetDataPoint(ctx, "a"); dp != nil {
 		t.Fatal("expected datapoint a removed")
 	}
-	if store.dataPoints["b"] == nil {
+	if dp, _ := store.GetDataPoint(ctx, "b"); dp == nil {
 		t.Fatal("expected s2 row kept")
 	}
 }
@@ -317,8 +353,8 @@ func TestRequest(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		// Check vector/relational storage
-		if len(store.dataPoints) != 0 {
-			t.Errorf("expected 0 data points stored, got %d", len(store.dataPoints))
+		if n := store.dataPointCount(); n != 0 {
+			t.Errorf("expected 0 data points stored, got %d", n)
 		}
 
 		// Check graph storage - should be populated regardless of NeedsVectorStorage
@@ -351,8 +387,8 @@ func TestRequest(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// Check storage: parent input datapoint + at least one chunk datapoint
-		if len(store.dataPoints) < 2 {
-			t.Errorf("expected at least 2 data points stored (parent + chunk), got %d", len(store.dataPoints))
+		if n := store.dataPointCount(); n < 2 {
+			t.Errorf("expected at least 2 data points stored (parent + chunk), got %d", n)
 		}
 
 		// Need to ensure the worker actually processed it. Since InMemory VectorStore is synchronous and 

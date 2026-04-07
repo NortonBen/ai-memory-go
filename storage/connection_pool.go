@@ -296,18 +296,22 @@ func (p *GenericConnectionPool) Close() error {
 // Stats returns current pool statistics
 func (p *GenericConnectionPool) Stats() *PoolStats {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
+	createdAt := p.stats.CreatedAt
+	avgLifetime := p.stats.AvgConnectionLifetime
+	p.mu.RUnlock()
 
-	stats := *p.stats
-	stats.TotalConnections = atomic.LoadInt32(&p.stats.TotalConnections)
-	stats.ActiveConnections = atomic.LoadInt32(&p.stats.ActiveConnections)
-	stats.IdleConnections = atomic.LoadInt32(&p.stats.IdleConnections)
-	stats.ConnectionsCreated = atomic.LoadInt64(&p.stats.ConnectionsCreated)
-	stats.ConnectionsClosed = atomic.LoadInt64(&p.stats.ConnectionsClosed)
-	stats.ConnectionsFailed = atomic.LoadInt64(&p.stats.ConnectionsFailed)
-	stats.LastUpdated = time.Now()
-
-	return &stats
+	// Counter fields are updated with atomics; do not copy *p.stats wholesale (data race with -race).
+	return &PoolStats{
+		TotalConnections:      atomic.LoadInt32(&p.stats.TotalConnections),
+		ActiveConnections:     atomic.LoadInt32(&p.stats.ActiveConnections),
+		IdleConnections:       atomic.LoadInt32(&p.stats.IdleConnections),
+		ConnectionsCreated:    atomic.LoadInt64(&p.stats.ConnectionsCreated),
+		ConnectionsClosed:     atomic.LoadInt64(&p.stats.ConnectionsClosed),
+		ConnectionsFailed:     atomic.LoadInt64(&p.stats.ConnectionsFailed),
+		AvgConnectionLifetime: avgLifetime,
+		CreatedAt:             createdAt,
+		LastUpdated:           time.Now(),
+	}
 }
 
 // Health performs a health check on the pool
