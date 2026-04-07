@@ -13,8 +13,6 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - revive
     - gosec
@@ -23,43 +21,47 @@ linters:
     - unparam
     - prealloc
     - exportloopref
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  
-  govet:
-    enable-all: true
-  
-  gofmt:
-    simplify: true
-  
-  revive:
+    govet:
+      enable-all: true
+
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          disabled: false
+        - name: var-naming
+          severity: warning
+          disabled: false
+        - name: package-comments
+          severity: warning
+          disabled: false
+
+    gosec:
+      excludes:
+        - G104 # Audit errors not checked
+      severity: medium
+      confidence: medium
+
+  exclusions:
     rules:
-      - name: exported
-        severity: warning
-        disabled: false
-      - name: var-naming
-        severity: warning
-        disabled: false
-      - name: package-comments
-        severity: warning
-        disabled: false
-  
-  gosec:
-    excludes:
-      - G104 # Audit errors not checked
-    severity: medium
-    confidence: medium
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
-  
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosec
