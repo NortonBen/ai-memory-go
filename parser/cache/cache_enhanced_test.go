@@ -3,7 +3,6 @@ package cache_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,15 +154,19 @@ func TestInMemoryParsingCache_EnhancedFeatures(t *testing.T) {
 
 	// Test size information
 	t.Run("SizeInformation", func(t *testing.T) {
-		initialEntries, initialMemory := pc.GetSize()
-		fmt.Printf("DEBUG: initialEntries=%d\n", initialEntries)
+		// Use a dedicated cache instance to avoid interference from async cleanup/delete
+		// triggered by previous subtests (e.g. expired TTL entry deletion).
+		sizeConfig := cache.DefaultCacheConfig()
+		sizeCache := cache.NewInMemoryParsingCache(sizeConfig)
+		defer sizeCache.Close()
+
+		initialEntries, initialMemory := sizeCache.GetSize()
 
 		chunks := []*schema.Chunk{{ID: "1", Content: "Size test content", Type: schema.ChunkTypeText}}
-		err := pc.Set(ctx, "size-test-key", chunks, nil)
+		err := sizeCache.Set(ctx, "size-test-key", chunks, nil)
 		require.NoError(t, err)
 
-		newEntries, newMemory := pc.GetSize()
-		fmt.Printf("DEBUG: newEntries=%d\n", newEntries)
+		newEntries, newMemory := sizeCache.GetSize()
 		assert.Equal(t, initialEntries+1, newEntries)
 		assert.True(t, newMemory > initialMemory)
 	})

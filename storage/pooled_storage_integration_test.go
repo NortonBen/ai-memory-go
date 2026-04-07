@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -142,9 +143,12 @@ func TestPooledStorageManagerIntegration(t *testing.T) {
 		const numOperations = 5
 
 		errChan := make(chan error, numGoroutines*numOperations*3) // 3 connection types
+		var wg sync.WaitGroup
 
 		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				for j := 0; j < numOperations; j++ {
 					// Test relational
 					conn, err := manager.GetRelationalConnection(ctx)
@@ -182,8 +186,8 @@ func TestPooledStorageManagerIntegration(t *testing.T) {
 			}()
 		}
 
-		// Wait a bit for operations to complete
-		time.Sleep(100 * time.Millisecond)
+		// Ensure all operations complete before manager is closed by defer.
+		wg.Wait()
 
 		// Check for errors
 		close(errChan)
