@@ -345,6 +345,17 @@ func (sa *SQLiteAdapter) DeleteDataPointsBySession(ctx context.Context, sessionI
 	return nil
 }
 
+// DeleteDataPointsUnscoped implements RelationalStore.
+func (sa *SQLiteAdapter) DeleteDataPointsUnscoped(ctx context.Context) error {
+	for _, table := range []string{"datapoints", "input_datapoints"} {
+		q := fmt.Sprintf("DELETE FROM %s WHERE session_id IS NULL OR session_id = ''", table)
+		if _, err := sa.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // QueryDataPoints implements RelationalStore
 func (sa *SQLiteAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPointQuery) ([]*schema.DataPoint, error) {
 	if q == nil {
@@ -407,7 +418,12 @@ func (sa *SQLiteAdapter) queryDataPointsFromTable(ctx context.Context, q *storag
 	`, table)
 	args := []interface{}{}
 
-	if q.SessionID != "" {
+	if q.UnscopedSessionOnly {
+		queryStr += " AND (session_id IS NULL OR session_id = '')"
+	} else if q.SessionID != "" && q.IncludeGlobalSession {
+		queryStr += " AND (session_id = ? OR session_id IS NULL OR session_id = '')"
+		args = append(args, q.SessionID)
+	} else if q.SessionID != "" {
 		queryStr += " AND session_id = ?"
 		args = append(args, q.SessionID)
 	}
@@ -651,6 +667,12 @@ func (sa *SQLiteAdapter) GetSessionMessages(ctx context.Context, sessionID strin
 	}
 
 	return messages, nil
+}
+
+// DeleteSessionMessages implements RelationalStore.
+func (sa *SQLiteAdapter) DeleteSessionMessages(ctx context.Context, sessionID string) error {
+	_, err := sa.db.ExecContext(ctx, `DELETE FROM session_messages WHERE session_id = ?`, sessionID)
+	return err
 }
 
 // StoreBatch implements RelationalStore

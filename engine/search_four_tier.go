@@ -293,14 +293,12 @@ func (e *defaultMemoryEngine) loadCoreTierDataPoints(ctx context.Context, query 
 	if e.store == nil {
 		return nil
 	}
-	q := &storage.DataPointQuery{
-		SessionID: query.SessionID,
-		Limit:     300,
-	}
-	if query.SessionID == "" {
-		q.SessionID = "default"
-	}
-	dps, err := e.store.QueryDataPoints(ctx, q)
+	normalized := effectiveSearchSessionID(query.SessionID)
+	dps, err := e.store.QueryDataPoints(ctx, &storage.DataPointQuery{
+		SessionID:            normalized,
+		IncludeGlobalSession: true,
+		Limit:                500,
+	})
 	if err != nil {
 		return nil
 	}
@@ -386,7 +384,7 @@ func (e *defaultMemoryEngine) hybridRankFromVectorScores(ctx context.Context, qu
 	trackDataPoint := func(id string) *itemScore {
 		if _, exists := scores[id]; !exists {
 			dp, err := e.store.GetDataPoint(ctx, id)
-			if err == nil && dp != nil {
+			if err == nil && dp != nil && dataPointVisibleForSearch(dp, query.SessionID) {
 				scores[id] = &itemScore{dp: dp}
 			}
 		}

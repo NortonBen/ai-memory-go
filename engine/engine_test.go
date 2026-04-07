@@ -126,8 +126,18 @@ func (m *mockStorage) StoreDataPoint(ctx context.Context, dp *schema.DataPoint) 
 func (m *mockStorage) QueryDataPoints(ctx context.Context, query *storage.DataPointQuery) ([]*schema.DataPoint, error) {
 	var res []*schema.DataPoint
 	for _, dp := range m.dataPoints {
-		if query.SessionID != "" && dp.SessionID != query.SessionID {
-			continue
+		if query.UnscopedSessionOnly {
+			if dp.SessionID != "" {
+				continue
+			}
+		} else if query.SessionID != "" {
+			if query.IncludeGlobalSession {
+				if dp.SessionID != "" && dp.SessionID != query.SessionID {
+					continue
+				}
+			} else if dp.SessionID != query.SessionID {
+				continue
+			}
 		}
 		if query.SearchText != "" && dp.Content != query.SearchText {
 			continue
@@ -145,7 +155,22 @@ func (m *mockStorage) GetDataPoint(ctx context.Context, id string) (*schema.Data
 }
 func (m *mockStorage) UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error { return nil }
 func (m *mockStorage) DeleteDataPoint(ctx context.Context, id string) error { return nil }
-func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error { return nil }
+func (m *mockStorage) DeleteDataPointsBySession(ctx context.Context, sessionID string) error {
+	for id, dp := range m.dataPoints {
+		if dp != nil && dp.SessionID == sessionID {
+			delete(m.dataPoints, id)
+		}
+	}
+	return nil
+}
+func (m *mockStorage) DeleteDataPointsUnscoped(ctx context.Context) error {
+	for id, dp := range m.dataPoints {
+		if dp != nil && dp.SessionID == "" {
+			delete(m.dataPoints, id)
+		}
+	}
+	return nil
+}
 func (m *mockStorage) StoreSession(ctx context.Context, session *schema.MemorySession) error { return nil }
 func (m *mockStorage) GetSession(ctx context.Context, sessionID string) (*schema.MemorySession, error) { return nil, nil }
 func (m *mockStorage) UpdateSession(ctx context.Context, session *schema.MemorySession) error { return nil }
@@ -159,6 +184,10 @@ func (m *mockStorage) AddMessageToSession(ctx context.Context, sessionID string,
 }
 func (m *mockStorage) GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error) {
 	return m.messages[sessionID], nil
+}
+func (m *mockStorage) DeleteSessionMessages(ctx context.Context, sessionID string) error {
+	delete(m.messages, sessionID)
+	return nil
 }
 
 func (m *mockStorage) Health(ctx context.Context) error { return nil }
@@ -219,6 +248,43 @@ func TestAddWithMemoryTier(t *testing.T) {
 	}
 	if schema.MemoryTierFromDataPoint(dp2) != schema.MemoryTierStorage {
 		t.Fatalf("second tier: got %q", schema.MemoryTierFromDataPoint(dp2))
+	}
+}
+
+func TestAddGlobalSession(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStorage()
+	eng := NewMemoryEngine(nil, nil, store, EngineConfig{MaxWorkers: 1})
+	defer eng.Close()
+
+	dp, err := eng.Add(ctx, "shared fact", WithGlobalSession())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dp.SessionID != "" {
+		t.Fatalf("want empty session_id for global, got %q", dp.SessionID)
+	}
+}
+
+func TestDeleteMemoryBySession(t *testing.T) {
+	ctx := context.Background()
+	store := newMockStorage()
+	_ = store.StoreDataPoint(ctx, &schema.DataPoint{ID: "a", Content: "x", SessionID: "s1"})
+	_ = store.StoreDataPoint(ctx, &schema.DataPoint{ID: "b", Content: "y", SessionID: "s2"})
+	g, _ := graph.NewStore(&graph.GraphConfig{Type: graph.StoreTypeInMemory})
+	v, _ := vector.NewVectorStore(&vector.VectorConfig{Type: vector.StoreTypeInMemory, Dimension: 3})
+	eng := NewMemoryEngineWithStores(nil, nil, store, g, v, EngineConfig{MaxWorkers: 1})
+	defer eng.Close()
+	_ = v.StoreEmbedding(ctx, "a", []float32{1, 0, 0}, map[string]interface{}{"source_id": "a"})
+
+	if err := eng.DeleteMemory(ctx, "", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	if dp, _ := store.GetDataPoint(ctx, "a"); dp != nil {
+		t.Fatal("expected datapoint a removed")
+	}
+	if store.dataPoints["b"] == nil {
+		t.Fatal("expected s2 row kept")
 	}
 }
 

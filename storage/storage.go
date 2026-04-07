@@ -22,6 +22,8 @@ type Storage interface {
 	UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error
 	DeleteDataPoint(ctx context.Context, id string) error
 	DeleteDataPointsBySession(ctx context.Context, sessionID string) error
+	// DeleteDataPointsUnscoped removes rows whose session_id is NULL or empty (global pool).
+	DeleteDataPointsUnscoped(ctx context.Context) error
 	QueryDataPoints(ctx context.Context, query *DataPointQuery) ([]*schema.DataPoint, error)
 
 	// Session operations
@@ -32,6 +34,7 @@ type Storage interface {
 	ListSessions(ctx context.Context, userID string) ([]*schema.MemorySession, error)
 	AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error
 	GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error)
+	DeleteSessionMessages(ctx context.Context, sessionID string) error
 
 	// Batch operations
 	StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error
@@ -50,6 +53,7 @@ type RelationalStore interface {
 	UpdateDataPoint(ctx context.Context, dataPoint *schema.DataPoint) error
 	DeleteDataPoint(ctx context.Context, id string) error
 	DeleteDataPointsBySession(ctx context.Context, sessionID string) error
+	DeleteDataPointsUnscoped(ctx context.Context) error
 
 	// Query operations
 	QueryDataPoints(ctx context.Context, query *DataPointQuery) ([]*schema.DataPoint, error)
@@ -63,6 +67,7 @@ type RelationalStore interface {
 	ListSessions(ctx context.Context, userID string) ([]*schema.MemorySession, error)
 	AddMessageToSession(ctx context.Context, sessionID string, message schema.Message) error
 	GetSessionMessages(ctx context.Context, sessionID string) ([]schema.Message, error)
+	DeleteSessionMessages(ctx context.Context, sessionID string) error
 
 	// Batch operations
 	StoreBatch(ctx context.Context, dataPoints []*schema.DataPoint) error
@@ -209,6 +214,11 @@ func DefaultStorageConfig() *StorageConfig {
 type DataPointQuery struct {
 	// Filtering
 	SessionID   string                 `json:"session_id,omitempty"`
+	// IncludeGlobalSession, with non-empty SessionID, matches that session OR unscoped rows (NULL / empty session_id).
+	IncludeGlobalSession bool `json:"include_global_session,omitempty"`
+	// UnscopedSessionOnly selects rows whose session_id is NULL or empty (shared / “global” memories).
+	// When true, SessionID is ignored by relational adapters for this clause.
+	UnscopedSessionOnly bool `json:"unscoped_session_only,omitempty"`
 	UserID      string                 `json:"user_id,omitempty"`
 	ContentType string                 `json:"content_type,omitempty"`
 	Filters     map[string]interface{} `json:"filters,omitempty"`

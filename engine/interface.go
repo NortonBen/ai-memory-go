@@ -22,7 +22,9 @@ type EngineConfig struct {
 // AddOptions holds optional parameters for the Add operation
 type AddOptions struct {
 	SessionID            string
-	Metadata             map[string]interface{}
+	// GlobalSession stores the DataPoint with empty session_id (shared across all named sessions in search).
+	GlobalSession bool
+	Metadata      map[string]interface{}
 	WaitUntilComplete    bool
 	ConsistencyThreshold float32
 	// MemoryTier phân vùng 4 tầng (core / general / data / storage). Ghi vào metadata memory_tier;
@@ -65,6 +67,14 @@ func WithConsistencyThreshold(threshold float32) AddOption {
 func WithSessionID(sessionID string) AddOption {
 	return func(o *AddOptions) {
 		o.SessionID = sessionID
+	}
+}
+
+// WithGlobalSession persists with empty session_id so the memory is visible from every named session (merged in search).
+func WithGlobalSession() AddOption {
+	return func(o *AddOptions) {
+		o.GlobalSession = true
+		o.SessionID = ""
 	}
 }
 

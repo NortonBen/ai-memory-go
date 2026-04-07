@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/NortonBen/ai-memory-go/schema"
@@ -129,6 +130,27 @@ func (s *Neo4jStore) DeleteBatch(ctx context.Context, nodeIDs []string, edgeIDs 
 		return nil, nil
 	})
 
+	return err
+}
+
+// DeleteGraphBySessionID implements GraphStore.
+func (s *Neo4jStore) DeleteGraphBySessionID(ctx context.Context, sessionID string) error {
+	_, err := s.executeWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		if strings.TrimSpace(sessionID) == "" {
+			q := `
+				MATCH (n:Node)
+				WHERE n.session_id IS NULL OR n.session_id = ''
+				DETACH DELETE n`
+			_, err := tx.Run(ctx, q, nil)
+			return nil, err
+		}
+		q := `
+			MATCH (n:Node)
+			WHERE n.session_id = $sid
+			DETACH DELETE n`
+		_, err := tx.Run(ctx, q, map[string]interface{}{"sid": sessionID})
+		return nil, err
+	})
 	return err
 }
 

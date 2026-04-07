@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/NortonBen/ai-memory-go/engine"
+	"github.com/NortonBen/ai-memory-go/internal/sessionid"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -70,8 +71,12 @@ var addCmd = &cobra.Command{
 			return
 		}
 
-		sessionID := GetSessionID()
-		addOpts := []engine.AddOption{engine.WithSessionID(sessionID)}
+		var addOpts []engine.AddOption
+		if sid, global := sessionid.ForDataPointAdd(GetSessionRaw()); global {
+			addOpts = append(addOpts, engine.WithGlobalSession())
+		} else {
+			addOpts = append(addOpts, engine.WithSessionID(sid))
+		}
 		if strings.TrimSpace(addTier) != "" {
 			addOpts = append(addOpts, engine.WithMemoryTier(addTier))
 		}

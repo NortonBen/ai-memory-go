@@ -102,7 +102,9 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 	}
 
 	sessionID := options.SessionID
-	if sessionID == "" {
+	if options.GlobalSession {
+		sessionID = ""
+	} else if sessionID == "" {
 		// Fallback check if someone used sessionID or session_id in metadata instead
 		if sid, ok := options.Metadata["session_id"].(string); ok && sid != "" {
 			sessionID = sid
@@ -142,8 +144,12 @@ func (e *defaultMemoryEngine) Add(ctx context.Context, content string, opts ...A
 	searchQuery := &storage.DataPointQuery{
 		SearchText: content,
 		SearchMode: "exact",
-		SessionID:  sessionID,
 		Limit:      1,
+	}
+	if sessionID == "" {
+		searchQuery.UnscopedSessionOnly = true
+	} else {
+		searchQuery.SessionID = sessionID
 	}
 	if existingMatches, err := e.store.QueryDataPoints(ctx, searchQuery); err == nil && len(existingMatches) > 0 {
 		// Only dedupe against INPUT records.

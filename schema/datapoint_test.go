@@ -184,13 +184,12 @@ func TestDataPointValidation(t *testing.T) {
 			errMsg:    "DataPoint Content is required",
 		},
 		{
-			name: "missing SessionID",
+			name: "global empty SessionID allowed",
 			dataPoint: &DataPoint{
 				ID:      "dp_123",
 				Content: "Test content",
 			},
-			expectErr: true,
-			errMsg:    "DataPoint SessionID is required",
+			expectErr: false,
 		},
 	}
 

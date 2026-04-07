@@ -344,6 +344,22 @@ func (s *SQLiteGraphStore) DeleteBatch(ctx context.Context, nodeIDs []string, ed
 	return tx.Commit()
 }
 
+// DeleteGraphBySessionID implements GraphStore.
+func (s *SQLiteGraphStore) DeleteGraphBySessionID(ctx context.Context, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM graph_edges WHERE session_id IS NULL OR session_id = ''`); err != nil {
+			return err
+		}
+		_, err := s.db.ExecContext(ctx, `DELETE FROM graph_nodes WHERE session_id IS NULL OR session_id = ''`)
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM graph_edges WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM graph_nodes WHERE session_id = ?`, sessionID)
+	return err
+}
+
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 func (s *SQLiteGraphStore) GetNodeCount(_ context.Context) (int64, error) {

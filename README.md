@@ -5,111 +5,241 @@
 [![codecov](https://codecov.io/gh/NortonBen/ai-memory-go/branch/main/graph/badge.svg)](https://codecov.io/gh/NortonBen/ai-memory-go)
 [![Go Reference](https://pkg.go.dev/badge/github.com/NortonBen/ai-memory-go.svg)](https://pkg.go.dev/github.com/NortonBen/ai-memory-go)
 
-A Go-native AI Memory library inspired by Cognee's architecture, providing persistent knowledge graph memory for AI agents.
+Go library for persistent knowledge-graph + vector memory for AI agents, with a data-driven pipeline, pluggable storage, a first-party CLI, and an MCP server for IDE integration.
 
 ## Overview
 
-This library implements a Data-Driven Pipeline using Go's concurrency features for high-performance parallel processing. It provides four core operations (Add, Cognify, Memify, Search) and supports multiple LLM providers, pluggable storage backends, and seamless integration with Wails desktop applications and Go AI services.
+- **`engine` (`MemoryEngine`)**: **Add**, **Cognify**, **Search**, **Think**, **Request** (chat / intent flow), and **DeleteMemory** (by datapoint id or by session scope).
+- **Tiers & search**: **memory tier** metadata (`core`, `general`, `data`, `storage`, …), **labels** on ingest; optional **four-tier** retrieval in engine config and in Think / Request / MCP.
+- **Sessions**: named workspaces; CLI keywords **`global` / `shared` / `_`** store **shared** rows (`session_id` empty) while Search / Think / Request keep a stable default engine context for chat history (see `internal/sessionid`, `session` command).
+- **CLI (`ai-memory-cli`)**: Cobra + Viper; config file **`~/.ai-memory.yaml`** (default), optional active session in **`~/.ai-memory/session.txt`**.
+- **MCP**: `mcp` subcommand runs a Model Context Protocol server over **stdio** (default) or **streamable HTTP**, exposing **`memory_search`**, **`memory_add`**, **`memory_think`**, **`memory_request`**, **`memory_delete`**.
 
-## Module Information
+## Module
 
 - **Module**: `github.com/NortonBen/ai-memory-go`
-- **Go Version**: 1.25.0
-- **Status**: In Development (Phase 1: Core Foundation)
+- **Go**: `1.25.0`
 
-## Core Features
+## Features
 
-- **Data-Driven Pipeline**: Add → Cognify → Memify → Search pipeline
-- **Multi-Provider LLM Support**: OpenAI, Anthropic, Gemini, Ollama, DeepSeek, Mistral, Bedrock
-- **Hybrid Storage**: Graph databases, vector stores, and relational databases
-- **Go-Native**: Pure Go implementation with idiomatic interfaces
-- **Production-Ready**: Built for high-throughput AI services
+- Ingest → Cognify (embeddings, graph extraction, …) → search / reasoning.
+- Multiple embedding / LLM providers (OpenAI, Ollama, LM Studio, OpenRouter, … — see `vector`, `extractor`, and `examples/`).
+- Hybrid storage: **graph** adapters (in-memory, SQLite, Redis, Neo4j), **vector** (SQLite + sqlite-vec, Qdrant, …), **relational** (SQLite, PostgreSQL).
+- Optional **`view`** command serves a small web UI (`internal/view`).
 
-## Quick Start
+## Library quick start
 
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/NortonBen/ai-memory-go/engine"
-)
-
-func main() {
-    ctx := context.Background()
-    // Assume engine is initialized with stores
-    // Memory engine smartly detects intent: extracts relation to Graph,
-    // and conditionally saves to Vector only if user provides a fact/document
-    // engine.Request(ctx, "session-123", "User: My favorite color is blue.")
-    fmt.Println("AI Memory Integration - Go Library")
-}
+```bash
+go get github.com/NortonBen/ai-memory-go@latest
 ```
+
+For a minimal SQLite + local embedder walkthrough, run `go run ./examples/quickstart/` after pointing the embedder at your environment (see comments in that file).
+
+## CLI
+
+Build the CLI:
+
+```bash
+make build-cli
+# or: go build -o ai-memory-cli cmd/ai-memory-cli/main.go
+```
+
+Global flags: `--config`, `-s` / `--session`, `-v` / `--verbose`, `-f` / `--format` (`text`, `json`, `yaml`).
+
+| Command | Purpose |
+|--------|---------|
+| `add` | Add content to memory |
+| `cognify` | Run Cognify on a datapoint |
+| `search` | Semantic / graph / hybrid retrieval (per config) |
+| `think` | Multi-step reasoning over graph / context |
+| `request` | Conversational flow (intent, memory updates, answer) |
+| `delete` | Delete by id or wipe a session |
+| `session` | No args: print active session; `switch <name>` writes `~/.ai-memory/session.txt`; `list` is currently a stub |
+| `config` | Print config; `config --init` writes default `~/.ai-memory.yaml` |
+| `analyze-history` | Analyze recent chat history to refine the knowledge graph |
+| `view` | Start the viewer HTTP server |
+| `mcp` | Run MCP server for Cursor, Claude Desktop, etc. |
+
+**MCP examples**
+
+```bash
+./ai-memory-cli mcp --transport stdio
+./ai-memory-cli mcp --transport http --listen :8080 --path /mcp
+```
+
+## Configuration (`~/.ai-memory.yaml`)
+
+The CLI loads **`$HOME/.ai-memory.yaml`** by default. Override with **`--config /path/to/file.yaml`**. Viper **`AutomaticEnv()`** is enabled, so you can override individual keys with environment variables where Viper resolves them (see [Viper environment variables](https://github.com/spf13/viper#working-with-environment-variables)).
+
+Run **`ai-memory-cli config --init`** to create a starter file. The tables below match what **`internal/cli/config.go`** reads when building the engine (`InitEngine` / `initRuntime`).
+
+### Example (defaults from `config --init`)
+
+```yaml
+db:
+  # After `config --init`, datadir is an absolute path (e.g. /home/you/.ai-memory/data)
+  datadir: /path/to/.ai-memory/data
+  vector:
+    provider: sqlite          # sqlite | redis | postgres | qdrant
+  graph:
+    provider: sqlite          # sqlite | redis | neo4j
+  redis:
+    endpoint: localhost:6379
+    password: ""
+  postgres:
+    host: localhost
+    port: 5432
+    username: postgres
+    password: postgres
+    database: ai_memory
+    collection: vector_embeddings
+  qdrant:
+    host: localhost
+    port: 6334
+    collection: ai_memory
+  neo4j:
+    host: localhost
+    port: 7687
+    username: neo4j
+    password: password
+    database: neo4j
+
+llm:
+  provider: lmstudio
+  endpoint: http://localhost:1234/v1
+  model: qwen/qwen3-4b-2507
+  api_key: ""
+
+embedder:
+  provider: lmstudio
+  endpoint: http://localhost:1234/v1
+  model: text-embedding-nomic-embed-text-v1.5
+  dimensions: 768
+  api_key: ""
+  onnx:
+    model_path: ""
+    tokenizer_path: ""
+    model_precision: ""       # auto | fp32 | int8 (empty = provider default)
+    max_seq_len: 512
+    query_task: "Retrieve semantically similar text"
+    use_query_instruction: true
+
+graph:
+  extractor: ""               # empty or llm (default) | deberta
+  deberta:
+    model_path: ""
+    tokenizer_path: ""
+    labels_path: ""
+    max_seq_len: 0
+    exec_provider: ""         # cpu | coreml | cuda | auto
+    model_precision: ""       # auto | fp32 | int8
+```
+
+### `db.*` — storage
+
+| Key | Type | Used when | Meaning |
+|-----|------|-----------|---------|
+| `db.datadir` | string | always | Directory for local SQLite files (`graph.db`, `vectors.db`, `rel.db`). Default if empty: `~/.ai-memory/data`. |
+| `db.graph.provider` | string | always | Graph backend: **`sqlite`** (file under `datadir`), **`redis`**, or **`neo4j`**. |
+| `db.vector.provider` | string | always | Vector backend: **`sqlite`** (sqlite-vec under `datadir`), **`redis`**, **`postgres`** (pgvector), or **`qdrant`**. |
+| `db.redis.endpoint` | string | graph or vector = `redis` | `host:port` (port optional; default Redis port if omitted). |
+| `db.redis.password` | string | graph or vector = `redis` | Redis password (empty if none). |
+| `db.postgres.*` | | vector = `postgres` | Connection to PostgreSQL + pgvector collection. |
+| `db.postgres.host` | string | | Hostname. |
+| `db.postgres.port` | int | | Port (e.g. `5432`). |
+| `db.postgres.username` | string | | DB user. |
+| `db.postgres.password` | string | | DB password. |
+| `db.postgres.database` | string | | Database name. |
+| `db.postgres.collection` | string | | Logical collection / table name for embeddings (see vector adapter). |
+| `db.qdrant.host` | string | vector = `qdrant` | Qdrant host. |
+| `db.qdrant.port` | int | | Qdrant gRPC port (template uses `6334`). |
+| `db.qdrant.collection` | string | | Collection name. |
+| `db.neo4j.host` | string | graph = `neo4j` | **Bolt URI** passed to the driver (e.g. `bolt://localhost:7687`). The init template uses `localhost`; for a real server, prefer a full URI. |
+| `db.neo4j.port` | int | | Written by `config --init` but **not** currently appended to the URI in `initRuntime`—put host+port in `host` if needed. |
+| `db.neo4j.username` | string | | Neo4j user. |
+| `db.neo4j.password` | string | | Neo4j password. |
+| `db.neo4j.database` | string | | Written by `config --init`; **not** wired in the current Neo4j graph init path. |
+
+**Relational metadata** (datapoints, etc.) is always **SQLite** at **`{db.datadir}/rel.db`** in this code path—there is no YAML toggle for a different relational backend in `initRuntime`.
+
+### `llm.*` — chat / extraction LLM
+
+Passed to `extractor.ProviderConfig` (`Type`, `Endpoint`, `Model`, `APIKey`).
+
+| Key | Meaning |
+|-----|---------|
+| `llm.provider` | One of: **`openai`**, **`anthropic`**, **`gemini`**, **`ollama`**, **`deepseek`**, **`mistral`**, **`bedrock`**, **`azure`**, **`cohere`**, **`huggingface`**, **`local`**, **`lmstudio`**, **`openrouter`**, **`custom`** (see `extractor/registry/provider_factory.go`). |
+| `llm.endpoint` | API base URL (LM Studio / Ollama / custom gateways). |
+| `llm.model` | Model id for that provider. |
+| `llm.api_key` | API key when the provider requires it. |
+
+### `embedder.*` — embeddings
+
+| Key | Meaning |
+|-----|---------|
+| `embedder.provider` | Embedding backend string (e.g. **`openai`**, **`ollama`**, **`lmstudio`**, **`openrouter`**, **`onnx`**, …—see `extractor.EmbeddingProviderType` and `DefaultEmbeddingProviderFactory`). |
+| `embedder.endpoint` | Embedding API base URL. |
+| `embedder.model` | Embedding model name. |
+| `embedder.dimensions` | Vector size; must match the model / stores. Default **`768`** if `0`. For **`onnx`**, runtime forces **`640`** (Harrier-style models). |
+| `embedder.api_key` | Key when required by the provider. |
+
+When **`embedder.provider`** is **`onnx`**, these are passed via `CustomOptions`:
+
+| Key | Meaning |
+|-----|---------|
+| `embedder.onnx.model_path` | Path to the ONNX model file. |
+| `embedder.onnx.tokenizer_path` | Tokenizer assets path. |
+| `embedder.onnx.model_precision` | `auto`, `fp32`, or `int8` (see ONNX embedder docs). |
+| `embedder.onnx.max_seq_len` | Max tokens / sequence length (default `512`). |
+| `embedder.onnx.query_task` | Instruction text for query embeddings when instruction mode is on. |
+| `embedder.onnx.use_query_instruction` | Whether to use query-specific instruction encoding. |
+
+### `graph.*` — graph extraction mode
+
+| Key | Meaning |
+|-----|---------|
+| `graph.extractor` | **`""`** or **`llm`**: graph extraction only via the configured LLM (`BasicExtractor`). **`deberta`**: hybrid **DeBERTa NER (ONNX) + LLM** (`HybridGraphExtractor`). Any other value fails startup. |
+| `graph.deberta.model_path` | DeBERTa ONNX model path. |
+| `graph.deberta.tokenizer_path` | `tokenizer.json` (e.g. HuggingFace export). |
+| `graph.deberta.labels_path` | `labels.json` mapping indices to IOB labels. |
+| `graph.deberta.max_seq_len` | Max sequence length (model default often `512` if `0`). |
+| `graph.deberta.exec_provider` | ONNX Runtime provider: **`cpu`**, **`coreml`**, **`cuda`**, **`auto`**, etc. |
+| `graph.deberta.model_precision` | `auto`, `fp32`, or `int8`. |
+
+**Note:** `EngineConfig` (workers, four-tier, chunk concurrency, …) is not populated from this YAML in `initRuntime`; the engine is created with fixed `MaxWorkers: 4`. For advanced engine tuning, use the Go API (`engine.NewMemoryEngineWithStores` with your own `engine.EngineConfig`).
 
 ## Development
 
-### Running Tests
-
 ```bash
-# Run all tests
-make test
-
-# Run tests with race detection
-make test-race
-
-# Generate coverage report
-make coverage
+make test          # go test ./...
+make test-race     # tests with -race
+make coverage      # coverage.out + coverage.html
+make lint          # golangci-lint
+make fmt           # go fmt + goimports
+make build         # go build ./... + repo root main package
+make build-cli     # ai-memory-cli binary
+make security      # gosec
+make ci            # fmt, lint, test-race, build, security
 ```
 
-### Code Quality
+Run `make help` for the full list.
 
-```bash
-# Run linter
-make lint
-
-# Format code
-make fmt
-
-# Run security scan
-make security
-```
-
-### Building
-
-```bash
-# Build the project
-make build
-
-# Run all CI checks locally
-make ci
-```
-
-For more commands, run `make help`.
-
-## Development Status
-
-This project is currently in **Phase 1: Core Foundation**. The following tasks are being implemented:
-
-- [x] Task 1.1.1: Create main module `github.com/NortonBen/ai-memory-go`
-- [ ] Task 1.1.2: Set up package structure
-- [ ] Task 1.1.3: Configure Go modules and dependencies
-- [x] Task 1.1.4: Set up CI/CD pipeline with GitHub Actions
-
-## Architecture
-
-The library follows a layered architecture based on Data-Driven Pipeline principles:
+## Architecture (high level)
 
 ```
-Memory API Layer (Add, Cognify, Memify, Search)
-├── Data-Driven Pipeline Core
-├── Package Structure (parser, schema, extractor, graph, vector, storage)
-└── Storage Layer (Graph, Vector, Relational)
+CLI / MCP / examples
+        ↓
+   engine (MemoryEngine)
+        ↓
+ parser · schema · extractor · graph · vector · storage
+        ↓
+ adapters (SQLite, PostgreSQL, Neo4j, Redis, Qdrant, …)
 ```
 
 ## License
 
-[License information to be added]
+No `LICENSE` file is present in this repository yet; add one when the project chooses a license.
 
 ## Contributing
 
-[Contributing guidelines to be added]
+Contributing guidelines are not defined here yet.

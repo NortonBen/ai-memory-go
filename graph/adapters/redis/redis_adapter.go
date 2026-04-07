@@ -401,6 +401,13 @@ func (s *RedisGraphStore) DeleteBatch(ctx context.Context, nodeIDs []string, edg
 	return nil
 }
 
+// DeleteGraphBySessionID implements GraphStore (not fully implemented for Redis layout).
+func (s *RedisGraphStore) DeleteGraphBySessionID(ctx context.Context, sessionID string) error {
+	_ = ctx
+	_ = sessionID
+	return nil
+}
+
 func (s *RedisGraphStore) GetNodeCount(ctx context.Context) (int64, error) {
 	var cursor uint64
 	var count int64

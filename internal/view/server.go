@@ -13,6 +13,7 @@ import (
 
 	"github.com/NortonBen/ai-memory-go/engine"
 	memorygraph "github.com/NortonBen/ai-memory-go/graph"
+	"github.com/NortonBen/ai-memory-go/internal/sessionid"
 	"github.com/NortonBen/ai-memory-go/schema"
 	"github.com/NortonBen/ai-memory-go/storage"
 	"github.com/NortonBen/ai-memory-go/vector"
@@ -69,6 +70,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc(p+"/vectors", s.handleVectors)
 	s.mux.HandleFunc(p+"/search", s.handleSearch)
 	s.mux.HandleFunc(p+"/memory", s.handleMemory)
+	s.mux.HandleFunc(p+"/memory/session", s.handleSessionMemoryDelete)
 	s.mux.HandleFunc(p+"/think", s.handleThink)
 	s.mux.HandleFunc(p+"/graph/stats", s.handleGraphStats)
 	s.mux.HandleFunc(p+"/graph/neighbors", s.handleGraphNeighbors)
@@ -158,7 +160,7 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 	limit := boundInt(parseInt(r, "limit", 30), 1, 200)
 	offset := max(parseInt(r, "offset", 0), 0)
 	searchText := strings.TrimSpace(r.URL.Query().Get("q"))
-	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	sessionParam := strings.TrimSpace(r.URL.Query().Get("session"))
 	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))     // all|input|chunk|processed
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status"))) // pending|processing|...
 	if kind == "" {
@@ -173,7 +175,11 @@ func (s *Server) handleDataPoints(w http.ResponseWriter, r *http.Request) {
 	query.Limit = 100000
 	query.Offset = 0
 	query.SearchText = searchText
-	query.SessionID = sessionID
+	if sid, unscoped := sessionid.ListFilter(sessionParam); unscoped {
+		query.UnscopedSessionOnly = true
+	} else {
+		query.SessionID = sid
+	}
 
 	results, err := s.deps.RelStore.QueryDataPoints(ctx, query)
 	if err != nil {
@@ -280,11 +286,15 @@ func (s *Server) handleProcessed(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRelationships(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	limit := boundInt(parseInt(r, "limit", 100), 1, 500)
-	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	sessionParam := strings.TrimSpace(r.URL.Query().Get("session"))
 
 	query := storage.DefaultDataPointQuery()
 	query.Limit = limit
-	query.SessionID = sessionID
+	if sid, unscoped := sessionid.ListFilter(sessionParam); unscoped {
+		query.UnscopedSessionOnly = true
+	} else {
+		query.SessionID = sid
+	}
 
 	results, err := s.deps.RelStore.QueryDataPoints(ctx, query)
 	if err != nil {
@@ -434,7 +444,7 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	limit := boundInt(parseInt(r, "limit", 25), 1, 200)
 	offset := max(parseInt(r, "offset", 0), 0)
-	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
+	sessionParam := strings.TrimSpace(r.URL.Query().Get("session"))
 	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))     // all|input|chunk|processed
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status"))) // pending|processing|...
 	if kind == "" {
@@ -446,7 +456,11 @@ func (s *Server) handleVectors(w http.ResponseWriter, r *http.Request) {
 
 	query := storage.DefaultDataPointQuery()
 	query.Limit = 100000
-	query.SessionID = sessionID
+	if sid, unscoped := sessionid.ListFilter(sessionParam); unscoped {
+		query.UnscopedSessionOnly = true
+	} else {
+		query.SessionID = sid
+	}
 
 	results, err := s.deps.RelStore.QueryDataPoints(ctx, query)
 	if err != nil {
@@ -533,10 +547,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := boundInt(parseInt(r, "limit", 5), 1, 50)
-	sessionID := strings.TrimSpace(r.URL.Query().Get("session"))
-	if sessionID == "" {
-		sessionID = "default"
-	}
+	sessionID := sessionid.ForEngineContext(r.URL.Query().Get("session"))
 
 	sq := &schema.SearchQuery{
 		Text:      queryText,
@@ -580,13 +591,31 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleMemory POST JSON: thêm nội dung với memory_tier tùy chọn; có thể bật cognify bất đồng bộ.
+// handleMemory: POST JSON thêm bộ nhớ; DELETE ?id=...&session=... (session tùy chọn, khớp session_id bản ghi khi có).
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
+	ctx := r.Context()
+	switch r.Method {
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("query param id is required"))
+			return
+		}
+		session := strings.TrimSpace(r.URL.Query().Get("session"))
+		if err := s.deps.Engine.DeleteMemory(ctx, id, session); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "id": id})
+		return
+	case http.MethodPost:
+		// fall through to body below
+	default:
+		w.Header().Set("Allow", "POST, DELETE")
 		writeErr(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
 		return
 	}
+
 	var body struct {
 		Content   string   `json:"content"`
 		SessionID string   `json:"session_id"`
@@ -603,13 +632,12 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("content is required"))
 		return
 	}
-	sessionID := strings.TrimSpace(body.SessionID)
-	if sessionID == "" {
-		sessionID = "default"
+	var opts []engine.AddOption
+	if sid, global := sessionid.ForDataPointAdd(body.SessionID); global {
+		opts = append(opts, engine.WithGlobalSession())
+	} else {
+		opts = append(opts, engine.WithSessionID(sid))
 	}
-
-	ctx := r.Context()
-	opts := []engine.AddOption{engine.WithSessionID(sessionID)}
 	if strings.TrimSpace(body.Tier) != "" {
 		opts = append(opts, engine.WithMemoryTier(body.Tier))
 	}
@@ -633,6 +661,28 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		"labels":        schema.LabelsFromMetadata(dp.Metadata),
 		"primary_label": primaryLabelFromDP(dp),
 		"cognify_queued": body.Cognify,
+	})
+}
+
+// handleSessionMemoryDelete: DELETE ?session=... — xóa toàn bộ dữ liệu session (SQL + vector + graph + lịch sử chat).
+func (s *Server) handleSessionMemoryDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodDelete)
+		writeErr(w, http.StatusMethodNotAllowed, fmt.Errorf("method not allowed"))
+		return
+	}
+	session := strings.TrimSpace(r.URL.Query().Get("session"))
+	if session == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("query param session is required"))
+		return
+	}
+	if err := s.deps.Engine.DeleteMemory(r.Context(), "", session); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":              true,
+		"deleted_session": session,
 	})
 }
 
@@ -683,10 +733,7 @@ func (s *Server) handleThink(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("text is required"))
 		return
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	if sessionID == "" {
-		sessionID = "default"
-	}
+	sessionID := sessionid.ForEngineContext(req.SessionID)
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 8

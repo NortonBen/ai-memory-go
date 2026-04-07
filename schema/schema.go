@@ -675,9 +675,7 @@ func (dp *DataPoint) Validate() error {
 	if dp.Content == "" {
 		return fmt.Errorf("DataPoint Content is required")
 	}
-	if dp.SessionID == "" {
-		return fmt.Errorf("DataPoint SessionID is required")
-	}
+	// Empty SessionID means global / unscoped memory (visible from every named session in search).
 	return nil
 }
 

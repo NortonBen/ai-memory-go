@@ -318,6 +318,17 @@ func (pa *PostgresAdapter) DeleteDataPointsBySession(ctx context.Context, sessio
 	return nil
 }
 
+// DeleteDataPointsUnscoped implements RelationalStore.
+func (pa *PostgresAdapter) DeleteDataPointsUnscoped(ctx context.Context) error {
+	for _, table := range []string{"datapoints", "input_datapoints"} {
+		q := fmt.Sprintf("DELETE FROM %s WHERE session_id IS NULL OR session_id = ''", table)
+		if _, err := pa.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // QueryDataPoints implements RelationalStore
 func (pa *PostgresAdapter) QueryDataPoints(ctx context.Context, q *storage.DataPointQuery) ([]*schema.DataPoint, error) {
 	if q == nil {
@@ -381,7 +392,13 @@ func (pa *PostgresAdapter) queryDataPointsFromTable(ctx context.Context, q *stor
 	args := []interface{}{}
 	argID := 1
 
-	if q.SessionID != "" {
+	if q.UnscopedSessionOnly {
+		queryStr += " AND (session_id IS NULL OR session_id = '')"
+	} else if q.SessionID != "" && q.IncludeGlobalSession {
+		queryStr += fmt.Sprintf(" AND (session_id = $%d OR session_id IS NULL OR session_id = '')", argID)
+		args = append(args, q.SessionID)
+		argID++
+	} else if q.SessionID != "" {
 		queryStr += fmt.Sprintf(" AND session_id = $%d", argID)
 		args = append(args, q.SessionID)
 		argID++
@@ -629,6 +646,12 @@ func (pa *PostgresAdapter) GetSessionMessages(ctx context.Context, sessionID str
 	}
 
 	return messages, nil
+}
+
+// DeleteSessionMessages implements RelationalStore.
+func (pa *PostgresAdapter) DeleteSessionMessages(ctx context.Context, sessionID string) error {
+	_, err := pa.db.ExecContext(ctx, `DELETE FROM session_messages WHERE session_id = $1`, sessionID)
+	return err
 }
 
 // StoreBatch implements RelationalStore

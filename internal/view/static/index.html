@@ -42,6 +42,28 @@
     <script type="text/babel">
       const { useEffect, useMemo, useRef, useState } = React;
 
+      /** Tên session mặc định trong DB (không phải “global”). */
+      const SESSION_DEFAULT = "default";
+      /**
+       * Search / Think: gửi lên API session có tên. Từ khóa global/shared/_ → server dùng ngữ cảnh "default"
+       * (bộ nhớ global vẫn được gộp khi truy hồi).
+       */
+      function normalizeEngineSession(raw) {
+        const t = String(raw ?? "").trim();
+        if (!t) return SESSION_DEFAULT;
+        const low = t.toLowerCase();
+        if (low === "global" || low === "shared" || low === "_") return SESSION_DEFAULT;
+        return t;
+      }
+      /** Add: global/shared/_ → lưu session_id rỗng (dùng chung mọi session có tên). */
+      function sessionFieldForMemoryPost(raw) {
+        const t = String(raw ?? "").trim();
+        if (!t) return { session_id: SESSION_DEFAULT };
+        const low = t.toLowerCase();
+        if (low === "global" || low === "shared" || low === "_") return { session_id: low };
+        return { session_id: t };
+      }
+
       async function api(path) {
         const res = await fetch(path);
         if (!res.ok) {
@@ -62,6 +84,26 @@
           throw new Error(err.error || "Request failed");
         }
         return res.json();
+      }
+
+      async function apiDelete(path) {
+        const res = await fetch(path, { method: "DELETE" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Request failed" }));
+          throw new Error(err.error || "Request failed");
+        }
+        return res.json();
+      }
+
+      function sessionListQuery(listSessionFilter) {
+        const s = String(listSessionFilter ?? "").trim();
+        if (!s) return "";
+        return `&session=${encodeURIComponent(s)}`;
+      }
+
+      function formatSessionCell(sid) {
+        if (sid == null || String(sid).trim() === "") return <span className="muted">(global)</span>;
+        return <code style={{ fontSize: "12px" }}>{String(sid)}</code>;
       }
 
       function TierBadge({ tier }) {
@@ -163,11 +205,15 @@
         const [graphRenderMeta, setGraphRenderMeta] = useState({ renderedNodes: 0, renderedEdges: 0, groups: [] });
         const [selectedGraphItem, setSelectedGraphItem] = useState(null);
         const [error, setError] = useState("");
+        const [delSessionInput, setDelSessionInput] = useState("default");
+        const [delSessionMsg, setDelSessionMsg] = useState("");
+        const [listSessionFilter, setListSessionFilter] = useState("");
         const graphRef = useRef(null);
 
         const loadOverview = async () => setOverview(await api("/api/overview"));
         const tierQ = () => (tierFilter && tierFilter !== "all" ? `&tier=${encodeURIComponent(tierFilter)}` : "");
         const labelQ = () => (labelFilter.trim() ? `&label=${encodeURIComponent(labelFilter.trim())}` : "");
+        const listSq = () => sessionListQuery(listSessionFilter);
         const parseLabelsInput = (s) =>
           s
             .split(/[,|]/)
@@ -183,28 +229,42 @@
             return p ? `${p}, ${t}` : t;
           });
         };
+        const deleteMemoryById = async (id, sessionId) => {
+          if (!id || !window.confirm(`Xóa datapoint ${id}?`)) return;
+          try {
+            setError("");
+            const p = new URLSearchParams({ id });
+            const sid = sessionId != null ? String(sessionId).trim() : "";
+            if (sid !== "") p.append("session", sid);
+            await apiDelete(`/api/memory?${p.toString()}`);
+            await refreshAll();
+          } catch (e) {
+            setError(e.message || String(e));
+          }
+        };
+
         const loadDataPoints = async () => {
           const offset = (dpPage - 1) * pageSize;
-          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}${tierQ()}${labelQ()}`);
+          const resp = await api(`/api/datapoints?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(dpKindFilter)}&status=${encodeURIComponent(dpStatusFilter)}${tierQ()}${labelQ()}${listSq()}`);
           setDatapoints(resp.items || []);
           setDatapointsTotal(resp.total || 0);
         };
         const loadInputs = async () => {
           const offset = (inputsPage - 1) * pageSize;
-          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}${tierQ()}${labelQ()}`);
+          const resp = await api(`/api/inputs?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(inputStatusFilter)}${tierQ()}${labelQ()}${listSq()}`);
           setInputs(resp.items || []);
           setInputsTotal(resp.total || 0);
         };
         const loadProcessed = async () => {
           const offset = (processedPage - 1) * pageSize;
-          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}${tierQ()}${labelQ()}`);
+          const resp = await api(`/api/processed?limit=${pageSize}&offset=${offset}&status=${encodeURIComponent(processedStatusFilter)}${tierQ()}${labelQ()}${listSq()}`);
           setProcessed(resp.items || []);
           setProcessedTotal(resp.total || 0);
         };
-        const loadRelationships = async () => setRelationships(await api("/api/relationships?limit=200"));
+        const loadRelationships = async () => setRelationships(await api(`/api/relationships?limit=200${listSq()}`));
         const loadVectors = async () => {
           const offset = (vectorsPage - 1) * pageSize;
-          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}${tierQ()}${labelQ()}`);
+          const resp = await api(`/api/vectors?limit=${pageSize}&offset=${offset}&kind=${encodeURIComponent(vecKindFilter)}&status=${encodeURIComponent(vecStatusFilter)}${tierQ()}${labelQ()}${listSq()}`);
           setVectors(resp.items || []);
           setVectorsTotal(resp.total || 0);
         };
@@ -410,7 +470,7 @@
           if (!query.trim()) return;
           try {
             setError("");
-            let url = `/api/search?q=${encodeURIComponent(query)}&limit=8&session=${encodeURIComponent((searchSession || "default").trim() || "default")}`;
+            let url = `/api/search?q=${encodeURIComponent(query)}&limit=8&session=${encodeURIComponent(normalizeEngineSession(searchSession))}`;
             if (searchFourTier) {
               url += "&four_tier=true";
               if (searchIncludeStorage) url += "&include_storage=true";
@@ -438,7 +498,7 @@
             const maxCtx = parseInt(thinkMaxCtx, 10);
             const body = {
               text: thinkText.trim(),
-              session_id: (thinkSession || "default").trim() || "default",
+              session_id: normalizeEngineSession(thinkSession),
               limit: Number.isFinite(lim) && lim > 0 ? lim : 8,
               hop_depth: Number.isFinite(hop) && hop > 0 ? hop : 2,
               analyze_query: thinkAnalyzeQuery,
@@ -496,9 +556,9 @@
             const labs = parseLabelsInput(addLabelsText);
             const body = {
               content: addContent,
-              session_id: (addSession || "default").trim() || "default",
               tier: addTier,
               cognify: addCognify,
+              ...sessionFieldForMemoryPost(addSession),
             };
             if (labs.length) body.labels = labs;
             const r = await apiPost("/api/memory", body);
@@ -520,14 +580,26 @@
             <p className="muted">Preview datapoints, vectors, graph relationships, and run search directly from browser.</p>
             {error ? <div className="card" style={{ borderColor: "#ef4444" }}>{error}</div> : null}
 
-            <div className="row" style={{ marginBottom: "16px" }}>
+            <div className="row" style={{ marginBottom: "16px", alignItems: "center" }}>
               {["overview", "add", "inputs", "processed", "datapoints", "vectors", "relationships", "graph", "search", "think"].map((name) => (
                 <button key={name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>
                   {name}
                 </button>
               ))}
+              <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                Lọc session (list)
+                <input
+                  value={listSessionFilter}
+                  onChange={(e) => setListSessionFilter(e.target.value)}
+                  placeholder="trống = tất cả; global"
+                  style={{ minWidth: "140px" }}
+                />
+              </label>
               <button onClick={() => refreshAll().catch((e) => setError(e.message))}>Làm mới dữ liệu</button>
             </div>
+            <p className="muted" style={{ marginTop: "-8px", marginBottom: "12px" }}>
+              API: <code>DELETE /api/memory?id=…&amp;session=…</code> (xóa một bản ghi), <code>DELETE /api/memory/session?session=…</code> (xóa cả session). Lọc session áp dụng cho bảng inputs/processed/datapoints/vectors/relationships.
+            </p>
 
             {tab === "add" && (
               <div className="card">
@@ -538,8 +610,11 @@
                 <div className="row" style={{ flexDirection: "column", alignItems: "stretch" }}>
                   <label>
                     Session{" "}
-                    <input value={addSession} onChange={(e) => setAddSession(e.target.value)} placeholder="default" style={{ minWidth: "200px" }} />
+                    <input value={addSession} onChange={(e) => setAddSession(e.target.value)} placeholder="default | global" style={{ minWidth: "200px" }} />
                   </label>
+                  <p className="muted" style={{ margin: 0 }}>
+                    <code>default</code> = session có tên trong DB. <code>global</code> / <code>shared</code> / <code>_</code> = bộ nhớ dùng chung (session_id rỗng), mọi session đều truy hồi được.
+                  </p>
                   <label>
                     Tier{" "}
                     <select value={addTier} onChange={(e) => setAddTier(e.target.value)}>
@@ -643,17 +718,23 @@
                 {inputs.length === 0 ? <div className="empty">Không có input records với filter status: <code>{inputStatusFilter}</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Progress</th></tr>
+                    <tr><th>ID</th><th>Session</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Progress</th><th>Thao tác</th></tr>
                   </thead>
                   <tbody>
                     {inputs.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
+                        <td>{formatSessionCell(d.session_id)}</td>
                         <td><TierBadge tier={d.memory_tier} /></td>
                         <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.content?.slice(0, 140)}</td>
                         <td>{d.status}</td>
                         <td>{d.processed_chunks || 0}/{d.total_chunks || 0}</td>
+                        <td>
+                          <button type="button" className="preset-chip" style={{ borderColor: "#fecaca", color: "#b91c1c" }} onClick={() => deleteMemoryById(d.id, d.session_id)}>
+                            Xóa
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -717,18 +798,24 @@
                 {processed.length === 0 ? <div className="empty">Không có processed datapoints với filter status: <code>{processedStatusFilter}</code>. Thử để <code>all</code>.</div> : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th></tr>
+                    <tr><th>ID</th><th>Session</th><th>Tier</th><th>Nhãn</th><th>Parent</th><th>Chunk</th><th>Status</th><th>Content</th><th>Thao tác</th></tr>
                   </thead>
                   <tbody>
                     {processed.map((d) => (
                       <tr key={d.id}>
                         <td>{d.id}</td>
+                        <td>{formatSessionCell(d.session_id)}</td>
                         <td><TierBadge tier={d.memory_tier} /></td>
                         <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.parent_id || "-"}</td>
                         <td>{Number.isInteger(d.chunk_index) ? `${d.chunk_index + 1}/${d.total_chunks || "?"}` : "-"}</td>
                         <td>{d.status}</td>
                         <td>{d.content?.slice(0, 120)}</td>
+                        <td>
+                          <button type="button" className="preset-chip" style={{ borderColor: "#fecaca", color: "#b91c1c" }} onClick={() => deleteMemoryById(d.id, d.session_id)}>
+                            Xóa
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -770,6 +857,45 @@
                 </div>
                 <h3>Latest</h3>
                 <pre>{JSON.stringify(overview.latest, null, 2)}</pre>
+                <div className="info-card" style={{ marginTop: "12px" }}>
+                  <strong>Session</strong>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>
+                    <code>default</code> là tên session thường dùng trong DB. <code>global</code> / <code>shared</code> / <code>_</code> khi thêm bộ nhớ → <code>session_id</code> rỗng (dùng chung); API list có thể lọc chỉ các bản ghi đó bằng <code>?session=global</code>.
+                  </p>
+                  <div className="row" style={{ marginTop: "10px", alignItems: "center" }}>
+                    <span style={{ fontSize: "13px" }}>Xóa toàn bộ session</span>
+                    <input
+                      value={delSessionInput}
+                      onChange={(e) => setDelSessionInput(e.target.value)}
+                      placeholder="default | test | global"
+                      style={{ minWidth: "160px" }}
+                    />
+                    <button
+                      type="button"
+                      style={{ borderColor: "#ef4444", color: "#b91c1c" }}
+                      onClick={async () => {
+                        const s = delSessionInput.trim();
+                        if (!s) return;
+                        if (!window.confirm(`Xóa toàn bộ dữ liệu session "${s}" (DB + vector + graph + chat)? Không hoàn tác.`)) return;
+                        try {
+                          setError("");
+                          setDelSessionMsg("");
+                          await apiDelete(`/api/memory/session?session=${encodeURIComponent(s)}`);
+                          setDelSessionMsg("Đã xóa xong.");
+                          await refreshAll();
+                        } catch (e) {
+                          setError(e.message || String(e));
+                        }
+                      }}
+                    >
+                      Xóa session
+                    </button>
+                  </div>
+                  {delSessionMsg ? <p className="muted" style={{ margin: "6px 0 0" }}>{delSessionMsg}</p> : null}
+                  <p className="muted" style={{ margin: "6px 0 0", fontSize: "12px" }}>
+                    CLI: <code>ai-memory-cli delete --session test --force</code> hoặc <code>--current</code>. <code>global</code> xóa pool <code>session_id</code> rỗng.
+                  </p>
+                </div>
                 {overview.datapoint_count === 0 && (
                   <div className="empty">
                     <strong>Database đang trống.</strong>
@@ -847,7 +973,7 @@
                 ) : null}
                 <table>
                   <thead>
-                    <tr><th>ID</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th></tr>
+                    <tr><th>ID</th><th>Session</th><th>Tier</th><th>Nhãn</th><th>Content</th><th>Status</th><th>Nodes</th><th>Edges</th><th>Thao tác</th></tr>
                   </thead>
                   <tbody>
                     {datapoints.map((d) => (
@@ -860,6 +986,7 @@
                             <div className="muted">chunk: #{d.chunk_index + 1}/{d.total_chunks || "?"}</div>
                           ) : null}
                         </td>
+                        <td>{formatSessionCell(d.session_id)}</td>
                         <td><TierBadge tier={d.memory_tier} /></td>
                         <td><LabelsCell primary={d.primary_label} labels={d.labels} /></td>
                         <td>{d.content?.slice(0, 120)}</td>
@@ -871,6 +998,11 @@
                         </td>
                         <td>{d.node_count}</td>
                         <td>{d.edge_count}</td>
+                        <td>
+                          <button type="button" className="preset-chip" style={{ borderColor: "#fecaca", color: "#b91c1c" }} onClick={() => deleteMemoryById(d.id, d.session_id)}>
+                            Xóa
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -946,16 +1078,22 @@
                 {vectors.length > 0 ? (
                   <table style={{ marginBottom: "12px" }}>
                     <thead>
-                      <tr><th>ID</th><th>Tier (DP)</th><th>Tier (vector)</th><th>Nhãn</th><th>Content</th></tr>
+                      <tr><th>ID</th><th>Session</th><th>Tier (DP)</th><th>Tier (vector)</th><th>Nhãn</th><th>Content</th><th>Thao tác</th></tr>
                     </thead>
                     <tbody>
                       {vectors.map((v) => (
                         <tr key={v.id}>
                           <td>{v.id}</td>
+                          <td>{formatSessionCell(v.session_id)}</td>
                           <td><TierBadge tier={v.memory_tier} /></td>
                           <td><TierBadge tier={v.vec_tier || v.memory_tier} /></td>
                           <td><LabelsCell primary={v.primary_label} labels={v.labels} /></td>
                           <td>{v.content?.slice(0, 100)}</td>
+                          <td>
+                            <button type="button" className="preset-chip" style={{ borderColor: "#fecaca", color: "#b91c1c" }} onClick={() => deleteMemoryById(v.id, v.session_id)}>
+                              Xóa
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1074,6 +1212,9 @@
                     <input value={searchSession} onChange={(e) => setSearchSession(e.target.value)} placeholder="default" style={{ minWidth: "160px" }} />
                   </label>
                 </div>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Session có tên (vd. <code>test</code>) chỉ trả bản ghi thuộc session đó + bản ghi global. Để gõ <code>global</code> ở đây vẫn dùng ngữ cảnh <code>default</code> cho lịch sử; bản ghi global vẫn được gộp.
+                </p>
                 <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
                   <label className="inline">
                     <input type="checkbox" checked={searchFourTier} onChange={(e) => setSearchFourTier(e.target.checked)} />
@@ -1123,6 +1264,9 @@
                     <input value={thinkHopDepth} onChange={(e) => setThinkHopDepth(e.target.value)} style={{ width: "56px" }} />
                   </label>
                 </div>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Cùng quy ước như Search: tên session hoặc để trống → <code>default</code>; <code>global</code>/<code>shared</code>/<code>_</code> → ngữ cảnh <code>default</code> (global memory vẫn merge).
+                </p>
                 <div className="row" style={{ marginBottom: "10px", alignItems: "center" }}>
                   <label className="inline">
                     <input type="checkbox" checked={thinkAnalyzeQuery} onChange={(e) => setThinkAnalyzeQuery(e.target.checked)} />

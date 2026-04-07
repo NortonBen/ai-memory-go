@@ -10,6 +10,21 @@ import (
 	"github.com/NortonBen/ai-memory-go/vector"
 )
 
+func TestDataPointVisibleForSearch(t *testing.T) {
+	if !dataPointVisibleForSearch(&schema.DataPoint{SessionID: "test"}, "test") {
+		t.Fatal("same session should match")
+	}
+	if dataPointVisibleForSearch(&schema.DataPoint{SessionID: "default"}, "test") {
+		t.Fatal("other named session must not match")
+	}
+	if !dataPointVisibleForSearch(&schema.DataPoint{SessionID: ""}, "test") {
+		t.Fatal("unscoped global row should match any search session")
+	}
+	if !dataPointVisibleForSearch(&schema.DataPoint{SessionID: "default"}, "") {
+		t.Fatal("empty query session normalizes to default")
+	}
+}
+
 func TestVectorResultSourceIDPrefersMetadataSourceID(t *testing.T) {
 	vr := &vector.SimilarityResult{
 		ID: "root-chunk-000-chunk-1",

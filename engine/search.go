@@ -21,12 +21,13 @@ func (e *defaultMemoryEngine) basicSearch(ctx context.Context, query *schema.Sea
 		}
 	}
 
-	storageQuery := &storage.DataPointQuery{
-		SearchText: query.Text,
-		Limit:      query.Limit,
-	}
-
-	dps, err := e.store.QueryDataPoints(ctx, storageQuery)
+	want := effectiveSearchSessionID(query.SessionID)
+	dps, err := e.store.QueryDataPoints(ctx, &storage.DataPointQuery{
+		SearchText:           query.Text,
+		Limit:                query.Limit,
+		SessionID:            want,
+		IncludeGlobalSession: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -243,12 +244,12 @@ func (e *defaultMemoryEngine) DeleteMemory(ctx context.Context, id string, sessi
 				}
 			}
 		}
-		
+		deleteVectorsForDataPoint(ctx, e.vectorStore, id)
 		return e.store.DeleteDataPoint(ctx, id)
 	}
 
 	if sessionID != "" {
-		return e.store.DeleteDataPointsBySession(ctx, sessionID)
+		return e.deleteMemoryWholeSession(ctx, sessionID)
 	}
 
 	return fmt.Errorf("must provide either id or sessionID")

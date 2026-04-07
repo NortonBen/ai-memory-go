@@ -40,6 +40,10 @@ type GraphStore interface {
 	StoreBatch(ctx context.Context, nodes []*schema.Node, edges []*schema.Edge) error
 	DeleteBatch(ctx context.Context, nodeIDs []string, edgeIDs []string) error
 
+	// DeleteGraphBySessionID removes nodes and edges tagged with this session_id.
+	// sessionID "" matches NULL/empty session (global / unscoped graph rows).
+	DeleteGraphBySessionID(ctx context.Context, sessionID string) error
+
 	// Analytics and metrics
 	GetNodeCount(ctx context.Context) (int64, error)
 	GetEdgeCount(ctx context.Context) (int64, error)

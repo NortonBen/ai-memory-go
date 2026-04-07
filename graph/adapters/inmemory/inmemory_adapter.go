@@ -3,6 +3,7 @@ package inmemory
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/NortonBen/ai-memory-go/graph"
@@ -429,6 +430,46 @@ func (img *InMemoryGraphStore) DeleteBatch(ctx context.Context, nodeIDs []string
 		delete(img.reverseList, nodeID)
 	}
 
+	return nil
+}
+
+// DeleteGraphBySessionID implements GraphStore.
+func (img *InMemoryGraphStore) DeleteGraphBySessionID(ctx context.Context, sessionID string) error {
+	match := func(s string) bool {
+		if strings.TrimSpace(sessionID) == "" {
+			return strings.TrimSpace(s) == ""
+		}
+		return s == sessionID
+	}
+
+	img.mu.Lock()
+	defer img.mu.Unlock()
+
+	var edgeIDs []string
+	for id, e := range img.edges {
+		if match(e.SessionID) {
+			edgeIDs = append(edgeIDs, id)
+		}
+	}
+	for _, edgeID := range edgeIDs {
+		if edge, exists := img.edges[edgeID]; exists {
+			img.removeEdgeFromList(img.adjacencyList[edge.From], edgeID)
+			img.removeEdgeFromList(img.reverseList[edge.To], edgeID)
+			delete(img.edges, edgeID)
+		}
+	}
+
+	var nodeIDs []string
+	for id, n := range img.nodes {
+		if match(n.SessionID) {
+			nodeIDs = append(nodeIDs, id)
+		}
+	}
+	for _, nodeID := range nodeIDs {
+		delete(img.nodes, nodeID)
+		delete(img.adjacencyList, nodeID)
+		delete(img.reverseList, nodeID)
+	}
 	return nil
 }
 
