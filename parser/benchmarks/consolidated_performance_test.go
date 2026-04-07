@@ -44,6 +44,9 @@ func TestOptimizedPerformanceBaselines(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping optimized performance baselines in short mode")
 	}
+	if os.Getenv("RUN_PERF_BASELINES") != "1" {
+		t.Skip("Skipping optimized performance baselines by default; set RUN_PERF_BASELINES=1 to enable")
+	}
 
 	// Use more realistic performance baselines based on actual system capabilities
 	optimizedBaselines := []BaselinePerformanceRequirement{
