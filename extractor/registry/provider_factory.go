@@ -3,12 +3,13 @@ package registry
 import (
 	"context"
 	"fmt"
-	ext "github.com/NortonBen/ai-memory-go/extractor"
 	"math/rand"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	ext "github.com/NortonBen/ai-memory-go/extractor"
 
 	"github.com/NortonBen/ai-memory-go/schema"
 

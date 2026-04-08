@@ -82,16 +82,8 @@ var addCmd = &cobra.Command{
 		if strings.TrimSpace(addTier) != "" {
 			addOpts = append(addOpts, engine.WithMemoryTier(addTier))
 		}
-		if strings.TrimSpace(addLabels) != "" {
-			var labs []string
-			for _, p := range strings.Split(addLabels, ",") {
-				if t := strings.TrimSpace(p); t != "" {
-					labs = append(labs, t)
-				}
-			}
-			if len(labs) > 0 {
-				addOpts = append(addOpts, engine.WithLabels(labs...))
-			}
+		if labs := parseLabelsCSV(addLabels); len(labs) > 0 {
+			addOpts = append(addOpts, engine.WithLabels(labs...))
 		}
 		dp, err := eng.Add(ctx, content, addOpts...)
 		if err != nil {
@@ -108,6 +100,20 @@ var addCmd = &cobra.Command{
 
 		color.Green("Successfully added memory with ID: %s", dp.ID)
 	},
+}
+
+func parseLabelsCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var labs []string
+	for _, p := range strings.Split(raw, ",") {
+		if t := strings.TrimSpace(p); t != "" {
+			labs = append(labs, t)
+		}
+	}
+	return labs
 }
 
 func init() {

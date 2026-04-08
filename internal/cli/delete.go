@@ -48,10 +48,7 @@ To delete only the global pool (empty session_id), use --session global (or shar
 
 		color.Red("Warning: Deletion is a destructive operation.")
 
-		sessionArg := strings.TrimSpace(delSession)
-		if sessionArg == "" && delCurrent {
-			sessionArg = GetSessionRaw()
-		}
+		sessionArg := resolveDeleteSessionArg(delSession, delCurrent)
 
 		if delID != "" || sessionArg != "" {
 			err = eng.DeleteMemory(ctx, delID, sessionArg)
@@ -67,6 +64,14 @@ To delete only the global pool (empty session_id), use --session global (or shar
 			_ = cmd.Help()
 		}
 	},
+}
+
+func resolveDeleteSessionArg(sessionFlag string, useCurrent bool) string {
+	sessionArg := strings.TrimSpace(sessionFlag)
+	if sessionArg == "" && useCurrent {
+		sessionArg = GetSessionRaw()
+	}
+	return sessionArg
 }
 
 func init() {
