@@ -3,6 +3,7 @@ module github.com/NortonBen/ai-memory-go
 go 1.25.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/fatih/color v1.19.0
 	github.com/google/uuid v1.6.0
@@ -28,7 +29,6 @@ require (
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
-	github.com/alicebob/miniredis/v2 v2.37.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect

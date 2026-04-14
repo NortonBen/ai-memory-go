@@ -4,7 +4,18 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/NortonBen/ai-memory-go/schema"
 )
+
+func TestGenerateEntityPrompt_CustomTemplate(t *testing.T) {
+	cfg := &ExtractionConfig{EntityPrompt: "ONLY: {text}"}
+	be := NewBasicExtractor(NewMockLLMProvider(ProviderOpenAI, "mock"), cfg)
+	p := be.generateEntityPrompt("hello")
+	if p != "ONLY: hello" {
+		t.Fatalf("custom entity prompt: got %q", p)
+	}
+}
 
 func TestGenerateEntityPrompt_IncludesNewOntology(t *testing.T) {
 	be := NewBasicExtractor(NewMockLLMProvider(ProviderOpenAI, "mock"), nil)
@@ -14,6 +25,17 @@ func TestGenerateEntityPrompt_IncludesNewOntology(t *testing.T) {
 		if !strings.Contains(p, expected) {
 			t.Fatalf("entity prompt must include %q, got: %s", expected, p)
 		}
+	}
+}
+
+func TestGenerateRelationshipPrompt_CustomTemplate(t *testing.T) {
+	cfg := &ExtractionConfig{RelationshipPrompt: "names={entities} text={text}"}
+	be := NewBasicExtractor(NewMockLLMProvider(ProviderOpenAI, "mock"), cfg)
+	a := schema.NewNode(schema.NodeTypePerson, map[string]interface{}{"name": "Ann"})
+	b := schema.NewNode(schema.NodeTypeOrg, map[string]interface{}{"name": "Acme"})
+	p := be.generateRelationshipPrompt("story", []schema.Node{*a, *b})
+	if !strings.Contains(p, "Ann, Acme") || !strings.Contains(p, "story") {
+		t.Fatalf("custom relationship prompt: %s", p)
 	}
 }
 

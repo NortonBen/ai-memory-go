@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"math"
 	"testing"
 
 	"github.com/NortonBen/ai-memory-go/schema"
@@ -60,5 +61,11 @@ func TestNormalizeConfidence(t *testing.T) {
 	}
 	if _, ok := normalizeConfidence(0); ok {
 		t.Fatalf("expected zero confidence to be invalid")
+	}
+	if _, ok := normalizeConfidence(math.NaN()); ok {
+		t.Fatalf("expected NaN confidence to be invalid")
+	}
+	if _, ok := normalizeConfidence(math.Inf(1)); ok {
+		t.Fatalf("expected +Inf confidence to be invalid")
 	}
 }

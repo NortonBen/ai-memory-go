@@ -487,3 +487,67 @@ func TestFailoverIntegration(t *testing.T) {
 		}
 	})
 }
+
+func TestFailoverManager_ContextCancelAndSubstringHelpers(t *testing.T) {
+	t.Run("ExecuteWithFailover returns context canceled", func(t *testing.T) {
+		fm := NewFailoverManager()
+		fm.SetRetryDelay(200 * time.Millisecond)
+		fm.SetMaxRetries(3)
+
+		manager := NewProviderManager()
+		cfg := ext.DefaultProviderConfig(ext.ProviderMistral)
+		cfg.APIKey = "k"
+		_ = manager.AddProvider("p1", NewConfiguredMockLLMProvider(ext.ProviderMistral, cfg), 1)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := fm.ExecuteWithFailover(ctx, []string{"p1"}, manager, func(provider ext.LLMProvider) error {
+			return ext.NewExtractorError("timeout", "temporary timeout", 503)
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled error, got %v", err)
+		}
+	})
+
+	t.Run("ExecuteEmbeddingWithFailover returns context canceled", func(t *testing.T) {
+		fm := NewFailoverManager()
+		fm.SetRetryDelay(200 * time.Millisecond)
+		fm.SetMaxRetries(2)
+
+		manager := NewEmbeddingProviderManager()
+		_ = manager.AddProvider("e1", ext.NewMockEmbeddingProvider("m", 8), 1)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := fm.ExecuteEmbeddingWithFailover(ctx, []string{"e1"}, manager, func(provider ext.EmbeddingProvider) error {
+			return ext.NewExtractorError("temporary_failure", "retry", 503)
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled error, got %v", err)
+		}
+	})
+
+	t.Run("containsSubstring and finder branches", func(t *testing.T) {
+		if !containsSubstring("abc", "abc") {
+			t.Fatal("expected exact match")
+		}
+		if !containsSubstring("prefix-xyz", "prefix") {
+			t.Fatal("expected prefix match")
+		}
+		if !containsSubstring("xyz-suffix", "suffix") {
+			t.Fatal("expected suffix match")
+		}
+		if !containsSubstring("a-mid-b", "mid") {
+			t.Fatal("expected middle match")
+		}
+		if containsSubstring("hello", "zz") {
+			t.Fatal("expected no match")
+		}
+		if !findSubstringInString("hello world", "world") {
+			t.Fatal("expected finder match")
+		}
+		if findSubstringInString("hello", "xyz") {
+			t.Fatal("expected finder no match")
+		}
+	})
+}
